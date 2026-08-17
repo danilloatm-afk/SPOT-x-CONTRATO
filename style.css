@@ -6,6 +6,7 @@
   --border: #e2e6ea;
   --primary: #4338c5;
   --primary-hover: #362bab;
+  --primary-soft: #ece9fb;
   --ok: #16a34a;
   --ok-bg: #e8f7ee;
   --atencao: #b45309;
@@ -23,6 +24,7 @@
     --text: #e8eaed;
     --text-muted: #9aa4af;
     --border: #2c333c;
+    --primary-soft: #262148;
     --ok-bg: #113322;
     --atencao-bg: #3a2c0d;
     --atrasado-bg: #3a1616;
@@ -36,6 +38,7 @@
   --text: #e8eaed;
   --text-muted: #9aa4af;
   --border: #2c333c;
+  --primary-soft: #262148;
   --ok-bg: #113322;
   --atencao-bg: #3a2c0d;
   --atrasado-bg: #3a1616;
@@ -48,6 +51,7 @@
   --text: #10141a;
   --text-muted: #3f4750;
   --border: #e2e6ea;
+  --primary-soft: #ece9fb;
   --ok-bg: #e8f7ee;
   --atencao-bg: #fef3c7;
   --atrasado-bg: #fde8e8;
@@ -118,6 +122,10 @@ h2 { font-size: 1.15rem; margin: 0 0 0.75rem; }
 h2.mt { margin-top: 1.75rem; }
 h3 { font-size: 1rem; margin: 0 0 0.75rem; }
 h3.mt { margin-top: 1.5rem; }
+.mt { margin-top: 1rem; }
+
+#tbl-pdf-itens select, #tbl-pdf-itens input { min-width: 140px; }
+#tbl-pdf-itens td { white-space: normal; }
 
 .resumo-grid {
   display: grid;
@@ -185,11 +193,11 @@ th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var
 td:first-child { white-space: normal; min-width: 140px; }
 th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; }
 
-.muted { color: var(--text-muted); font-size: 0.78rem; }
+.muted { color: var(--text-muted); font-size: 0.85rem; margin: -0.25rem 0 1rem; }
 
 .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
-.badge.status-aberto { color: var(--nunca); background: var(--nunca-bg); }
-.badge.status-encerrado { color: var(--ok); background: var(--ok-bg); }
+.badge.modalidade-spot { color: var(--atencao); background: var(--atencao-bg); }
+.badge.modalidade-contrato { color: var(--ok); background: var(--ok-bg); }
 
 .acoes { white-space: nowrap; }
 
@@ -207,62 +215,65 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; }
 
 .hidden { display: none !important; }
 
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 1.5rem;
-  overflow-y: auto;
-  z-index: 100;
-}
-
-.modal-card {
-  background: var(--surface);
-  border-radius: 10px;
-  max-width: 640px;
-  width: 100%;
-  margin-top: 2rem;
-}
-
-.modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.25rem 1.25rem 0;
-}
-
-.modal-head h2 { margin: 0; }
-
-.modal-form { max-width: none; border: none; padding: 1.25rem; }
-
-.modal-resumo { font-size: 0.88rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 0.75rem; }
-.modal-resumo strong { color: var(--text); }
-
-.modal-actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
-
-/* barra de progresso (indicador de avanço na cotação spot) */
-.progress-wrap { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+/* mini barra de progresso usada nas tabelas de avanço por produto */
+.progress-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 140px; }
 .progress-bar {
   flex: 1;
-  height: 10px;
+  height: 8px;
+  min-width: 80px;
   border-radius: 999px;
   background: var(--nunca-bg);
   overflow: hidden;
 }
-.progress-fill {
-  height: 100%;
-  background: var(--primary);
-  border-radius: 999px;
-  transition: width 0.3s ease;
-}
+.progress-fill { height: 100%; background: var(--primary); border-radius: 999px; }
 .progress-fill.completo { background: var(--ok); }
-.progress-label { font-size: 0.82rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; min-width: 3.2em; text-align: right; }
+.progress-label { font-size: 0.82rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; min-width: 3em; text-align: right; }
 
-.progress-bar.mini { height: 8px; min-width: 90px; }
-.progress-cell { display: flex; align-items: center; gap: 0.5rem; min-width: 160px; }
-.progress-cell .progress-label { min-width: 3em; }
+/* gráfico de evolução mensal (barras) */
+.chart-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1rem 0.5rem;
+  overflow-x: auto;
+}
 
-.anexos-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  height: 180px;
+  min-width: 280px;
+}
+
+.chart-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 44px;
+  height: 100%;
+}
+
+.chart-col-value { font-size: 0.78rem; font-weight: 600; color: var(--text); }
+
+.chart-col-bar-track {
+  width: 20px;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  background: var(--nunca-bg);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.chart-col-bar {
+  width: 100%;
+  background: var(--primary);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+
+.chart-col-label { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }

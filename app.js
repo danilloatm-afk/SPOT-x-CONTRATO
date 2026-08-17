@@ -2,8 +2,7 @@ const SUPABASE_URL = "https://jvfyqvefznkpcvjaerta.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2ZnlxdmVmem5rcGN2amFlcnRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyMTQ4NjgsImV4cCI6MjEwMTc5MDg2OH0.2Ef6LpZ61WM8myHBYeQGo3TuGqk5C3x36ER_sWRNPS4";
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const STATUS_LABEL = { aberto: "Aberto", encerrado: "Encerrado" };
-const TIPO_LABEL = { compra: "Compra", venda: "Venda" };
+const MODALIDADE_LABEL = { spot: "Spot", contrato: "Contrato" };
 
 // ---------- tema claro/escuro ----------
 const LS_TEMA = "cs_tema";
@@ -55,43 +54,14 @@ function formatarData(iso) {
 
 // ---------- caches ----------
 let produtosCache = [];
-let contrapartesCache = [];
-let contratosCache = [];
-let fixacoesCache = []; // fixações do contrato aberto no modal
-let contratoSelecionadoId = null;
+let fornecedoresCache = [];
+let comprasCache = []; // resultado filtrado da aba Compras
+let todasComprasCache = []; // todas as compras, usado pelo painel
 
 function nomePor(cache, id) {
   const item = cache.find((x) => String(x.id) === String(id));
   return item ? item.nome : "—";
 }
-
-// ---------- indicador: avanço na cotação spot ----------
-// avanço (%) = volume já fixado via cotação spot / volume total contratado
-function volumeFixado(contratoId) {
-  return fixacoesDoContrato(contratoId).reduce((soma, f) => soma + Number(f.volume), 0);
-}
-
-function fixacoesDoContrato(contratoId) {
-  return todasFixacoesCache.filter((f) => String(f.contrato_id) === String(contratoId));
-}
-
-function avancoPct(contrato) {
-  const fixado = volumeFixado(contrato.id);
-  const pct = contrato.volume_total > 0 ? (fixado / contrato.volume_total) * 100 : 0;
-  return Math.min(100, pct);
-}
-
-function progressoHtml(pct, largura = "") {
-  const arredondado = Math.round(pct * 10) / 10;
-  const completo = pct >= 100 ? "completo" : "";
-  return `
-    <div class="progress-cell">
-      <div class="progress-bar mini ${largura}"><div class="progress-fill ${completo}" style="width:${Math.min(100, pct)}%"></div></div>
-      <div class="progress-label">${arredondado}%</div>
-    </div>`;
-}
-
-let todasFixacoesCache = [];
 
 // ---------- tabs ----------
 document.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -109,16 +79,17 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 async function loadProdutos() {
   const { data, error } = await comTimeout(db.from("cs_produtos").select("*").order("ativo", { ascending: false }).order("nome"));
   produtosCache = error ? produtosCache : data;
-  preencherSelect("ct-produto", produtosCache, "Selecione um produto");
+  preencherSelect("cp-produto", produtosCache, "Selecione um produto");
   preencherSelect("fil-produto", produtosCache, "Todos os produtos", true);
   renderCadastroLista("lista-produtos", produtosCache, "cs_produtos");
 }
 
-async function loadContrapartes() {
-  const { data, error } = await comTimeout(db.from("cs_contrapartes").select("*").order("ativo", { ascending: false }).order("nome"));
-  contrapartesCache = error ? contrapartesCache : data;
-  preencherSelect("ct-contraparte", contrapartesCache, "Selecione uma contraparte");
-  renderCadastroLista("lista-contrapartes", contrapartesCache, "cs_contrapartes");
+async function loadFornecedores() {
+  const { data, error } = await comTimeout(db.from("cs_fornecedores").select("*").order("ativo", { ascending: false }).order("nome"));
+  fornecedoresCache = error ? fornecedoresCache : data;
+  preencherSelect("cp-fornecedor", fornecedoresCache, "Selecione um fornecedor");
+  preencherSelect("fil-fornecedor", fornecedoresCache, "Todos os fornecedores", true);
+  renderCadastroLista("lista-fornecedores", fornecedoresCache, "cs_fornecedores");
 }
 
 function preencherSelect(id, itens, placeholder, comTodos = false) {
@@ -165,10 +136,19 @@ document.querySelectorAll(".cadastro-lista").forEach((ul) => {
 });
 
 async function recarregarApoio() {
-  await Promise.all([loadProdutos(), loadContrapartes()]);
+  await Promise.all([loadProdutos(), loadFornecedores()]);
 }
 
 // ---------- formulários de cadastro ----------
+document.getElementById("form-fornecedor").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const nome = document.getElementById("fornecedor-nome").value.trim();
+  if (!nome) return;
+  await db.from("cs_fornecedores").insert({ nome });
+  document.getElementById("fornecedor-nome").value = "";
+  await loadFornecedores();
+});
+
 document.getElementById("form-produto").addEventListener("submit", async (e) => {
   e.preventDefault();
   const nome = document.getElementById("produto-nome").value.trim();
@@ -180,44 +160,32 @@ document.getElementById("form-produto").addEventListener("submit", async (e) => 
   await loadProdutos();
 });
 
-document.getElementById("form-contraparte").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const nome = document.getElementById("contraparte-nome").value.trim();
-  if (!nome) return;
-  await db.from("cs_contrapartes").insert({ nome });
-  document.getElementById("contraparte-nome").value = "";
-  await loadContrapartes();
-});
+// ---------- nova compra ----------
+document.getElementById("cp-data").value = new Date().toISOString().slice(0, 10);
 
-// ---------- novo contrato ----------
-document.getElementById("ct-data").value = new Date().toISOString().slice(0, 10);
-
-document.getElementById("form-contrato").addEventListener("submit", async (e) => {
+document.getElementById("form-compra").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const feedback = document.getElementById("ct-feedback");
+  const feedback = document.getElementById("cp-feedback");
   feedback.textContent = "Salvando...";
   feedback.className = "feedback";
   try {
-    const produtoId = document.getElementById("ct-produto").value || null;
-    const produto = produtosCache.find((p) => String(p.id) === String(produtoId));
-    const precoRef = document.getElementById("ct-preco-ref").value;
+    const volume = document.getElementById("cp-volume").value;
+    const valor = document.getElementById("cp-valor").value;
     const payload = {
-      numero: document.getElementById("ct-numero").value.trim(),
-      tipo: document.getElementById("ct-tipo").value,
-      contraparte_id: document.getElementById("ct-contraparte").value || null,
-      produto_id: produtoId,
-      unidade: produto ? produto.unidade : "saca",
-      volume_total: Number(document.getElementById("ct-volume").value),
-      data_contrato: document.getElementById("ct-data").value,
-      preco_referencia: precoRef ? Number(precoRef) : null,
-      observacoes: document.getElementById("ct-observacoes").value.trim(),
+      fornecedor_id: document.getElementById("cp-fornecedor").value || null,
+      produto_id: document.getElementById("cp-produto").value || null,
+      modalidade: document.getElementById("cp-modalidade").value,
+      data: document.getElementById("cp-data").value,
+      volume: volume ? Number(volume) : null,
+      valor: valor ? Number(valor) : null,
+      observacao: document.getElementById("cp-obs").value.trim(),
     };
-    const { error } = await db.from("cs_contratos").insert(payload);
+    const { error } = await db.from("cs_compras").insert(payload);
     if (error) throw error;
-    feedback.textContent = "Contrato registrado com sucesso.";
+    feedback.textContent = "Compra registrada com sucesso.";
     feedback.className = "feedback success";
     e.target.reset();
-    document.getElementById("ct-data").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("cp-data").value = new Date().toISOString().slice(0, 10);
   } catch (err) {
     feedback.textContent = "Erro ao salvar: " + err.message;
     feedback.className = "feedback error";
@@ -226,216 +194,150 @@ document.getElementById("form-contrato").addEventListener("submit", async (e) =>
 
 // ---------- lista / filtros ----------
 async function loadLista() {
-  let query = db.from("cs_contratos").select("*").order("data_contrato", { ascending: false });
-  const status = document.getElementById("fil-status").value;
+  let query = db.from("cs_compras").select("*").order("data", { ascending: false });
+  const modalidade = document.getElementById("fil-modalidade").value;
+  const fornecedor = document.getElementById("fil-fornecedor").value;
   const produto = document.getElementById("fil-produto").value;
-  if (status) query = query.eq("status", status);
+  if (modalidade) query = query.eq("modalidade", modalidade);
+  if (fornecedor) query = query.eq("fornecedor_id", fornecedor);
   if (produto) query = query.eq("produto_id", produto);
-  const [{ data, error }, { data: fixData }] = await Promise.all([
-    comTimeout(query),
-    comTimeout(db.from("cs_fixacoes").select("*")),
-  ]);
-  contratosCache = error ? [] : data;
-  todasFixacoesCache = fixData || [];
+  const { data, error } = await comTimeout(query);
+  comprasCache = error ? [] : data;
   renderLista();
 }
 
 function renderLista() {
   const tbody = document.querySelector("#tbl-lista tbody");
-  if (!contratosCache.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Nenhum contrato encontrado.</td></tr>';
+  if (!comprasCache.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhuma compra encontrada.</td></tr>';
     return;
   }
-  tbody.innerHTML = contratosCache
-    .map((c) => {
-      const produto = produtosCache.find((p) => String(p.id) === String(c.produto_id));
-      return `
-    <tr>
-      <td>${escapeHtml(c.numero)}</td>
-      <td>${TIPO_LABEL[c.tipo] || c.tipo}</td>
-      <td>${escapeHtml(nomePor(contrapartesCache, c.contraparte_id))}</td>
-      <td>${escapeHtml(produto ? produto.nome : "—")}</td>
-      <td>${formatarNumero(c.volume_total, 0)} ${escapeHtml(c.unidade || "")}</td>
-      <td>${progressoHtml(avancoPct(c))}</td>
-      <td><span class="badge status-${c.status}">${STATUS_LABEL[c.status]}</span></td>
-      <td class="acoes"><button class="link-btn" data-abrir="${c.id}">Detalhes</button></td>
-    </tr>`;
-    })
-    .join("");
-}
-
-document.getElementById("btn-filtrar-lista").addEventListener("click", loadLista);
-
-document.querySelector("#tbl-lista tbody").addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-abrir]");
-  if (!btn) return;
-  abrirModal(btn.dataset.abrir);
-});
-
-// ---------- modal detalhes do contrato ----------
-async function abrirModal(id) {
-  const contrato = contratosCache.find((x) => String(x.id) === String(id));
-  if (!contrato) return;
-  contratoSelecionadoId = id;
-
-  const { data } = await comTimeout(db.from("cs_fixacoes").select("*").eq("contrato_id", id).order("data", { ascending: false }));
-  fixacoesCache = data || [];
-  todasFixacoesCache = todasFixacoesCache.filter((f) => String(f.contrato_id) !== String(id)).concat(fixacoesCache);
-
-  const produto = produtosCache.find((p) => String(p.id) === String(contrato.produto_id));
-  document.getElementById("modal-titulo").textContent = `Contrato ${contrato.numero}`;
-  document.getElementById("modal-resumo").innerHTML = `
-    <div><strong>${TIPO_LABEL[contrato.tipo] || contrato.tipo}</strong> de <strong>${escapeHtml(produto ? produto.nome : "—")}</strong> com ${escapeHtml(nomePor(contrapartesCache, contrato.contraparte_id))}</div>
-    <div>Volume total: <strong>${formatarNumero(contrato.volume_total, 0)} ${escapeHtml(contrato.unidade || "")}</strong> — contrato de ${formatarData(contrato.data_contrato)}</div>
-    ${contrato.preco_referencia ? `<div>Preço de referência: <strong>${formatarNumero(contrato.preco_referencia)}</strong></div>` : ""}
-    ${contrato.observacoes ? `<div>${escapeHtml(contrato.observacoes)}</div>` : ""}
-  `;
-
-  atualizarProgressoModal(contrato);
-  renderFixacoes();
-
-  document.getElementById("fx-data").value = new Date().toISOString().slice(0, 10);
-  document.getElementById("fx-feedback").textContent = "";
-
-  const btnToggle = document.getElementById("btn-modal-toggle-status");
-  btnToggle.textContent = contrato.status === "aberto" ? "Encerrar contrato" : "Reabrir contrato";
-
-  document.getElementById("modal-overlay").classList.remove("hidden");
-}
-
-function atualizarProgressoModal(contrato) {
-  const pct = avancoPct(contrato);
-  const fixado = volumeFixado(contrato.id);
-  document.getElementById("modal-progress-fill").style.width = `${Math.min(100, pct)}%`;
-  document.getElementById("modal-progress-fill").classList.toggle("completo", pct >= 100);
-  document.getElementById("modal-progress-label").textContent = `${formatarNumero(fixado, 0)} / ${formatarNumero(contrato.volume_total, 0)} ${contrato.unidade || ""} fixados (${Math.round(pct * 10) / 10}%)`;
-}
-
-function renderFixacoes() {
-  const tbody = document.querySelector("#tbl-fixacoes tbody");
-  if (!fixacoesCache.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhuma fixação registrada ainda.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = fixacoesCache
+  tbody.innerHTML = comprasCache
     .map(
-      (f) => `
+      (c) => `
     <tr>
-      <td>${formatarData(f.data)}</td>
-      <td>${formatarNumero(f.volume, 0)}</td>
-      <td>${formatarNumero(f.preco_spot)}</td>
-      <td>${escapeHtml(f.observacao || "—")}</td>
-      <td class="acoes"><button class="link-btn danger" data-excluir-fixacao="${f.id}">Excluir</button></td>
+      <td>${formatarData(c.data)}</td>
+      <td>${escapeHtml(nomePor(fornecedoresCache, c.fornecedor_id))}</td>
+      <td>${escapeHtml(nomePor(produtosCache, c.produto_id))}</td>
+      <td><span class="badge modalidade-${c.modalidade}">${MODALIDADE_LABEL[c.modalidade]}</span></td>
+      <td>${c.volume != null ? formatarNumero(c.volume, 0) : "—"}</td>
+      <td>${c.valor != null ? "R$ " + formatarNumero(c.valor) : "—"}</td>
+      <td class="acoes"><button class="link-btn danger" data-excluir="${c.id}">Excluir</button></td>
     </tr>`
     )
     .join("");
 }
 
-function fecharModal() {
-  document.getElementById("modal-overlay").classList.add("hidden");
-  contratoSelecionadoId = null;
-}
+document.getElementById("btn-filtrar-lista").addEventListener("click", loadLista);
 
-document.getElementById("btn-modal-fechar").addEventListener("click", fecharModal);
-document.getElementById("modal-overlay").addEventListener("click", (e) => {
-  if (e.target.id === "modal-overlay") fecharModal();
-});
-
-document.getElementById("form-fixacao").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!contratoSelecionadoId) return;
-  const feedback = document.getElementById("fx-feedback");
-  feedback.textContent = "Salvando...";
-  feedback.className = "feedback";
-  try {
-    const payload = {
-      contrato_id: contratoSelecionadoId,
-      data: document.getElementById("fx-data").value,
-      volume: Number(document.getElementById("fx-volume").value),
-      preco_spot: Number(document.getElementById("fx-preco").value),
-      observacao: document.getElementById("fx-obs").value.trim(),
-    };
-    const { error } = await db.from("cs_fixacoes").insert(payload);
-    if (error) throw error;
-    feedback.textContent = "Fixação registrada.";
-    feedback.className = "feedback success";
-    e.target.reset();
-    document.getElementById("fx-data").value = new Date().toISOString().slice(0, 10);
-
-    const { data } = await comTimeout(db.from("cs_fixacoes").select("*").eq("contrato_id", contratoSelecionadoId).order("data", { ascending: false }));
-    fixacoesCache = data || [];
-    todasFixacoesCache = todasFixacoesCache.filter((f) => String(f.contrato_id) !== String(contratoSelecionadoId)).concat(fixacoesCache);
-    const contrato = contratosCache.find((x) => String(x.id) === String(contratoSelecionadoId));
-    atualizarProgressoModal(contrato);
-    renderFixacoes();
-    renderLista();
-  } catch (err) {
-    feedback.textContent = "Erro ao salvar: " + err.message;
-    feedback.className = "feedback error";
-  }
-});
-
-document.querySelector("#tbl-fixacoes tbody").addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-excluir-fixacao]");
+document.querySelector("#tbl-lista tbody").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-excluir]");
   if (!btn) return;
-  if (!confirm("Excluir esta fixação?")) return;
-  await db.from("cs_fixacoes").delete().eq("id", btn.dataset.excluirFixacao);
-  fixacoesCache = fixacoesCache.filter((f) => String(f.id) !== btn.dataset.excluirFixacao);
-  todasFixacoesCache = todasFixacoesCache.filter((f) => String(f.id) !== btn.dataset.excluirFixacao);
-  const contrato = contratosCache.find((x) => String(x.id) === String(contratoSelecionadoId));
-  atualizarProgressoModal(contrato);
-  renderFixacoes();
-  renderLista();
+  if (!confirm("Excluir esta compra?")) return;
+  await db.from("cs_compras").delete().eq("id", btn.dataset.excluir);
+  await loadLista();
 });
 
-document.getElementById("btn-modal-toggle-status").addEventListener("click", async () => {
-  const contrato = contratosCache.find((x) => String(x.id) === String(contratoSelecionadoId));
-  if (!contrato) return;
-  const novoStatus = contrato.status === "aberto" ? "encerrado" : "aberto";
-  await db.from("cs_contratos").update({ status: novoStatus }).eq("id", contrato.id);
-  contrato.status = novoStatus;
-  document.getElementById("btn-modal-toggle-status").textContent = novoStatus === "aberto" ? "Encerrar contrato" : "Reabrir contrato";
-  renderLista();
-});
-
-document.getElementById("btn-modal-excluir").addEventListener("click", async () => {
-  if (!contratoSelecionadoId) return;
-  if (!confirm("Excluir este contrato e todas as suas fixações? Essa ação não pode ser desfeita.")) return;
-  await db.from("cs_contratos").delete().eq("id", contratoSelecionadoId);
-  contratosCache = contratosCache.filter((c) => String(c.id) !== String(contratoSelecionadoId));
-  fecharModal();
-  renderLista();
-});
-
-// ---------- painel / indicadores ----------
-async function loadPainel() {
-  const [{ data: contratos, error: erroContratos }, { data: fixacoes, error: erroFixacoes }] = await Promise.all([
-    comTimeout(db.from("cs_contratos").select("*")),
-    comTimeout(db.from("cs_fixacoes").select("*")),
-  ]);
-  contratosCache = erroContratos ? [] : contratos;
-  todasFixacoesCache = erroFixacoes ? [] : fixacoes;
-
-  renderResumoCards();
-  renderTabelaAvanco();
-  renderTabelaProduto();
+// ---------- indicador: avanço de spot para contrato ----------
+// Uma relação fornecedor+produto é considerada "migrada" quando a compra
+// mais recente registrada para ela foi via contrato.
+function relacoesFornecedorProduto(compras) {
+  const grupos = {};
+  compras.forEach((c) => {
+    const chave = `${c.fornecedor_id}|${c.produto_id}`;
+    if (!grupos[chave]) grupos[chave] = [];
+    grupos[chave].push(c);
+  });
+  return Object.entries(grupos).map(([chave, doGrupo]) => {
+    const [fornecedor_id, produto_id] = chave.split("|");
+    const ordenadas = [...doGrupo].sort((a, b) => (a.data < b.data ? 1 : -1));
+    const maisRecente = ordenadas[0];
+    return {
+      fornecedor_id,
+      produto_id,
+      modalidade_atual: maisRecente.modalidade,
+      data_ultima_compra: maisRecente.data,
+      compras: ordenadas,
+    };
+  });
 }
 
-function renderResumoCards() {
-  const abertos = contratosCache.filter((c) => c.status === "aberto");
-  const volumeTotal = abertos.reduce((s, c) => s + Number(c.volume_total), 0);
-  const volumeFixadoTotal = abertos.reduce((s, c) => s + volumeFixado(c.id), 0);
-  const avancoGlobal = volumeTotal > 0 ? Math.min(100, (volumeFixadoTotal / volumeTotal) * 100) : 0;
-  const concluidos = abertos.filter((c) => avancoPct(c) >= 100).length;
-  const semFixacao = abertos.filter((c) => volumeFixado(c.id) === 0).length;
+function calcularAvanco(relacoes) {
+  const total = relacoes.length;
+  const migradas = relacoes.filter((r) => r.modalidade_atual === "contrato").length;
+  const pct = total > 0 ? (migradas / total) * 100 : 0;
+  return { total, migradas, aindaSpot: total - migradas, pct };
+}
+
+// % migrado ao final de cada um dos últimos N meses (visão cumulativa: para
+// cada relação fornecedor+produto, qual era a modalidade da compra mais
+// recente até aquele mês).
+function evolucaoMensal(compras, meses = 6) {
+  const hoje = new Date();
+  const pontos = [];
+  for (let i = meses - 1; i >= 0; i--) {
+    const refDate = new Date(hoje.getFullYear(), hoje.getMonth() - i + 1, 0); // último dia do mês
+    const refIso = refDate.toISOString().slice(0, 10);
+    const comprasAteMes = compras.filter((c) => c.data <= refIso);
+    const relacoes = relacoesFornecedorProduto(comprasAteMes);
+    const { pct, total } = calcularAvanco(relacoes);
+    pontos.push({
+      label: refDate.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }),
+      pct: total > 0 ? pct : null,
+    });
+  }
+  return pontos;
+}
+
+function renderGraficoEvolucao(pontos) {
+  const wrap = document.getElementById("grafico-evolucao");
+  if (!pontos.some((p) => p.pct !== null)) {
+    wrap.innerHTML = '<div class="empty-state">Sem compras registradas ainda para calcular a evolução.</div>';
+    return;
+  }
+  wrap.innerHTML = `<div class="chart-bars">${pontos
+    .map((p) => {
+      const altura = p.pct === null ? 0 : Math.max(2, p.pct);
+      return `
+      <div class="chart-col">
+        <div class="chart-col-value">${p.pct === null ? "—" : Math.round(p.pct) + "%"}</div>
+        <div class="chart-col-bar-track"><div class="chart-col-bar" style="height:${altura}%"></div></div>
+        <div class="chart-col-label">${escapeHtml(p.label)}</div>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+function progressoHtml(pct) {
+  const arredondado = Math.round(pct * 10) / 10;
+  const completo = pct >= 100 ? "completo" : "";
+  return `
+    <div class="progress-cell">
+      <div class="progress-bar"><div class="progress-fill ${completo}" style="width:${Math.min(100, pct)}%"></div></div>
+      <div class="progress-label">${arredondado}%</div>
+    </div>`;
+}
+
+// ---------- painel ----------
+async function loadPainel() {
+  const { data, error } = await comTimeout(db.from("cs_compras").select("*"));
+  todasComprasCache = error ? [] : data;
+
+  const relacoes = relacoesFornecedorProduto(todasComprasCache);
+  renderResumoCards(relacoes);
+  renderGraficoEvolucao(evolucaoMensal(todasComprasCache));
+  renderTabelaFornecedor(relacoes);
+  renderTabelaProduto(relacoes);
+}
+
+function renderResumoCards(relacoes) {
+  const { total, migradas, aindaSpot, pct } = calcularAvanco(relacoes);
 
   const cards = [
-    { label: "Contratos em aberto", valor: abertos.length, cls: "" },
-    { label: "Volume total contratado", valor: formatarNumero(volumeTotal, 0), cls: "" },
-    { label: "Volume fixado (spot)", valor: formatarNumero(volumeFixadoTotal, 0), cls: "" },
-    { label: "Avanço global na cotação", valor: `${Math.round(avancoGlobal * 10) / 10}%`, cls: avancoGlobal >= 70 ? "ok" : "" },
-    { label: "Contratos 100% fixados", valor: concluidos, cls: "ok" },
-    { label: "Sem nenhuma fixação ainda", valor: semFixacao, cls: semFixacao > 0 ? "atrasado" : "" },
+    { label: "Relações fornecedor + produto", valor: total, cls: "" },
+    { label: "Já migradas para contrato", valor: migradas, cls: "ok" },
+    { label: "Ainda em cotação spot", valor: aindaSpot, cls: aindaSpot > 0 ? "atrasado" : "" },
+    { label: "Avanço geral da migração", valor: `${Math.round(pct * 10) / 10}%`, cls: pct >= 70 ? "ok" : "" },
   ];
 
   document.getElementById("resumo-cards").innerHTML = cards
@@ -449,48 +351,57 @@ function renderResumoCards() {
     .join("");
 }
 
-function renderTabelaAvanco() {
-  const tbody = document.querySelector("#tbl-avanco tbody");
-  const abertos = contratosCache.filter((c) => c.status === "aberto").sort((a, b) => avancoPct(a) - avancoPct(b));
-  if (!abertos.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum contrato em aberto.</td></tr>';
+function renderTabelaFornecedor(relacoes) {
+  const tbody = document.querySelector("#tbl-fornecedor tbody");
+  const porFornecedor = {};
+  relacoes.forEach((r) => {
+    if (!porFornecedor[r.fornecedor_id]) porFornecedor[r.fornecedor_id] = [];
+    porFornecedor[r.fornecedor_id].push(r);
+  });
+  const linhas = Object.entries(porFornecedor);
+  if (!linhas.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sem dados ainda.</td></tr>';
     return;
   }
-  tbody.innerHTML = abertos
-    .map((c) => {
-      const produto = produtosCache.find((p) => String(p.id) === String(c.produto_id));
+  tbody.innerHTML = linhas
+    .map(([fornecedorId, doFornecedor]) => {
+      const produtos = doFornecedor.map((r) => nomePor(produtosCache, r.produto_id)).join(", ");
+      const todasContrato = doFornecedor.every((r) => r.modalidade_atual === "contrato");
+      const todasSpot = doFornecedor.every((r) => r.modalidade_atual === "spot");
+      const statusLabel = todasContrato ? "Contrato" : todasSpot ? "Spot" : "Parcial";
+      const statusClasse = todasContrato ? "modalidade-contrato" : todasSpot ? "modalidade-spot" : "modalidade-spot";
+      const ultimaCompra = doFornecedor.reduce((max, r) => (r.data_ultima_compra > max ? r.data_ultima_compra : max), doFornecedor[0].data_ultima_compra);
       return `
     <tr>
-      <td>${escapeHtml(c.numero)}</td>
-      <td>${escapeHtml(nomePor(contrapartesCache, c.contraparte_id))}</td>
-      <td>${escapeHtml(produto ? produto.nome : "—")}</td>
-      <td>${formatarNumero(c.volume_total, 0)} ${escapeHtml(c.unidade || "")}</td>
-      <td>${formatarNumero(volumeFixado(c.id), 0)} ${escapeHtml(c.unidade || "")}</td>
-      <td>${progressoHtml(avancoPct(c))}</td>
+      <td>${escapeHtml(nomePor(fornecedoresCache, fornecedorId))}</td>
+      <td>${escapeHtml(produtos)}</td>
+      <td><span class="badge ${statusClasse}">${statusLabel}</span></td>
+      <td>${formatarData(ultimaCompra)}</td>
     </tr>`;
     })
     .join("");
 }
 
-function renderTabelaProduto() {
+function renderTabelaProduto(relacoes) {
   const tbody = document.querySelector("#tbl-produto tbody");
-  const abertos = contratosCache.filter((c) => c.status === "aberto");
-  const produtosComContrato = produtosCache.filter((p) => abertos.some((c) => String(c.produto_id) === String(p.id)));
-  if (!produtosComContrato.length) {
+  const porProduto = {};
+  relacoes.forEach((r) => {
+    if (!porProduto[r.produto_id]) porProduto[r.produto_id] = [];
+    porProduto[r.produto_id].push(r);
+  });
+  const linhas = Object.entries(porProduto);
+  if (!linhas.length) {
     tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sem dados ainda.</td></tr>';
     return;
   }
-  tbody.innerHTML = produtosComContrato
-    .map((p) => {
-      const doProduto = abertos.filter((c) => String(c.produto_id) === String(p.id));
-      const volumeTotal = doProduto.reduce((s, c) => s + Number(c.volume_total), 0);
-      const fixado = doProduto.reduce((s, c) => s + volumeFixado(c.id), 0);
-      const pct = volumeTotal > 0 ? Math.min(100, (fixado / volumeTotal) * 100) : 0;
+  tbody.innerHTML = linhas
+    .map(([produtoId, doProduto]) => {
+      const { migradas, aindaSpot, pct } = calcularAvanco(doProduto);
       return `
     <tr>
-      <td>${escapeHtml(p.nome)}</td>
-      <td>${formatarNumero(volumeTotal, 0)} ${escapeHtml(p.unidade || "")}</td>
-      <td>${formatarNumero(fixado, 0)} ${escapeHtml(p.unidade || "")}</td>
+      <td>${escapeHtml(nomePor(produtosCache, produtoId))}</td>
+      <td>${migradas}</td>
+      <td>${aindaSpot}</td>
       <td>${progressoHtml(pct)}</td>
     </tr>`;
     })
@@ -498,6 +409,159 @@ function renderTabelaProduto() {
 }
 
 document.getElementById("btn-refresh-painel").addEventListener("click", loadPainel);
+
+// ---------- importar pedido de compra (PDF) ----------
+const EXTRACT_PDF_URL = `${SUPABASE_URL}/functions/v1/extract-pedido`;
+let pdfExtraido = null; // { fornecedor_nome, itens: [{produto_nome, quantidade, unidade}] }
+
+function arquivoParaBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Não foi possível ler o arquivo"));
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.readAsDataURL(file);
+  });
+}
+
+function encontrarPorNome(nome, cache) {
+  const alvo = String(nome || "").trim().toLowerCase();
+  if (!alvo) return null;
+  return cache.find((i) => i.nome.trim().toLowerCase() === alvo) || null;
+}
+
+function preencherSelectComNovo(id, cache, nomeExtraido) {
+  const sel = document.getElementById(id);
+  const match = encontrarPorNome(nomeExtraido, cache);
+  const ativos = cache.filter((i) => i.ativo);
+  const opcoes = ativos.map((i) => `<option value="${i.id}">${escapeHtml(i.nome)}</option>`).join("");
+  sel.innerHTML = `<option value="novo">+ Novo: "${escapeHtml(nomeExtraido)}"</option>${opcoes}`;
+  if (match) sel.value = String(match.id);
+}
+
+document.getElementById("btn-ler-pdf").addEventListener("click", async () => {
+  const input = document.getElementById("pdf-arquivo");
+  const feedback = document.getElementById("pdf-feedback");
+  const file = input.files && input.files[0];
+  if (!file) {
+    feedback.textContent = "Selecione um arquivo PDF primeiro.";
+    feedback.className = "feedback error";
+    return;
+  }
+  feedback.textContent = "Lendo PDF (pode levar alguns segundos)...";
+  feedback.className = "feedback";
+  document.getElementById("pdf-revisao").classList.add("hidden");
+  try {
+    const pdfBase64 = await arquivoParaBase64(file);
+    const resp = await fetch(EXTRACT_PDF_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+        authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ pdf_base64: pdfBase64 }),
+    });
+    const resultado = await resp.json();
+    if (!resp.ok || resultado.error) throw new Error(resultado.error || "Falha ao ler o PDF.");
+
+    pdfExtraido = resultado.data;
+    feedback.textContent = `Lido com sucesso: ${pdfExtraido.itens.length} item(ns) encontrado(s). Confira abaixo.`;
+    feedback.className = "feedback success";
+
+    preencherSelectComNovo("pdf-fornecedor", fornecedoresCache, pdfExtraido.fornecedor_nome);
+    document.getElementById("pdf-data").value = new Date().toISOString().slice(0, 10);
+    renderTabelaPdfItens();
+    document.getElementById("pdf-revisao").classList.remove("hidden");
+  } catch (err) {
+    feedback.textContent = "Erro: " + err.message;
+    feedback.className = "feedback error";
+  }
+});
+
+function renderTabelaPdfItens() {
+  const tbody = document.querySelector("#tbl-pdf-itens tbody");
+  const ativos = produtosCache.filter((p) => p.ativo);
+  const opcoesBase = ativos.map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join("");
+  tbody.innerHTML = pdfExtraido.itens
+    .map((item, idx) => {
+      const match = encontrarPorNome(item.produto_nome, produtosCache);
+      return `
+    <tr data-idx="${idx}">
+      <td><input type="checkbox" class="pdf-item-incluir" checked></td>
+      <td>
+        <select class="pdf-item-produto">
+          <option value="novo">+ Novo: "${escapeHtml(item.produto_nome)}"</option>
+          ${opcoesBase}
+        </select>
+      </td>
+      <td><input type="number" class="pdf-item-quantidade" step="0.01" min="0" value="${item.quantidade}"></td>
+      <td>${escapeHtml(item.unidade || "—")}</td>
+    </tr>`;
+    })
+    .join("");
+  document.querySelectorAll("#tbl-pdf-itens tbody tr").forEach((tr) => {
+    const idx = Number(tr.dataset.idx);
+    const match = encontrarPorNome(pdfExtraido.itens[idx].produto_nome, produtosCache);
+    if (match) tr.querySelector(".pdf-item-produto").value = String(match.id);
+  });
+}
+
+document.getElementById("btn-salvar-pdf").addEventListener("click", async () => {
+  const feedback = document.getElementById("pdf-salvar-feedback");
+  feedback.textContent = "Salvando...";
+  feedback.className = "feedback";
+  try {
+    let fornecedorId = document.getElementById("pdf-fornecedor").value;
+    if (fornecedorId === "novo") {
+      const { data, error } = await db.from("cs_fornecedores").insert({ nome: pdfExtraido.fornecedor_nome }).select().single();
+      if (error) throw error;
+      fornecedorId = data.id;
+    }
+
+    const modalidade = document.getElementById("pdf-modalidade").value;
+    const data_compra = document.getElementById("pdf-data").value;
+    const linhas = Array.from(document.querySelectorAll("#tbl-pdf-itens tbody tr"));
+
+    let salvos = 0;
+    for (const tr of linhas) {
+      const incluir = tr.querySelector(".pdf-item-incluir").checked;
+      if (!incluir) continue;
+      const idx = Number(tr.dataset.idx);
+      const item = pdfExtraido.itens[idx];
+      let produtoId = tr.querySelector(".pdf-item-produto").value;
+      if (produtoId === "novo") {
+        const { data: novoProduto, error: erroProduto } = await db
+          .from("cs_produtos")
+          .insert({ nome: item.produto_nome, unidade: item.unidade || "un" })
+          .select()
+          .single();
+        if (erroProduto) throw erroProduto;
+        produtoId = novoProduto.id;
+      }
+      const quantidade = Number(tr.querySelector(".pdf-item-quantidade").value);
+      const { error: erroCompra } = await db.from("cs_compras").insert({
+        fornecedor_id: fornecedorId,
+        produto_id: produtoId,
+        modalidade,
+        data: data_compra,
+        volume: quantidade,
+      });
+      if (erroCompra) throw erroCompra;
+      salvos++;
+    }
+
+    feedback.textContent = `${salvos} compra(s) salva(s) com sucesso.`;
+    feedback.className = "feedback success";
+    document.getElementById("pdf-revisao").classList.add("hidden");
+    document.getElementById("pdf-arquivo").value = "";
+    document.getElementById("pdf-feedback").textContent = "";
+    pdfExtraido = null;
+    await recarregarApoio();
+  } catch (err) {
+    feedback.textContent = "Erro ao salvar: " + err.message;
+    feedback.className = "feedback error";
+  }
+});
 
 // ---------- inicialização ----------
 (async function init() {

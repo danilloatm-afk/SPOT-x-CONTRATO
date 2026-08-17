@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cotação Spot</title>
+<title>Avanço para Contratos</title>
 <link rel="stylesheet" href="style.css">
 <meta name="theme-color" content="#4338c5">
 </head>
@@ -12,15 +12,16 @@
 <div id="app-shell">
 <header class="topbar">
   <div class="topbar-title-row">
-    <h1>📈 Cotação Spot</h1>
+    <h1>📈 Avanço para Contratos</h1>
     <div class="topbar-actions">
       <button id="btn-theme-toggle" type="button" class="btn secondary small theme-toggle" title="Alternar modo claro/escuro">🌙</button>
     </div>
   </div>
   <nav class="tabs">
     <button class="tab-btn active" data-tab="painel">Painel</button>
-    <button class="tab-btn" data-tab="novo">Novo Contrato</button>
-    <button class="tab-btn" data-tab="lista">Contratos</button>
+    <button class="tab-btn" data-tab="nova">Nova Compra</button>
+    <button class="tab-btn" data-tab="importar">Importar PDF</button>
+    <button class="tab-btn" data-tab="lista">Compras</button>
     <button class="tab-btn" data-tab="config">Configurações</button>
   </nav>
 </header>
@@ -30,16 +31,20 @@
   <!-- PAINEL -->
   <section id="tab-painel" class="tab-content active">
     <div class="section-head">
-      <h2>Indicadores</h2>
+      <h2>Indicador: migração de cotação spot para contrato</h2>
       <button id="btn-refresh-painel" class="btn secondary">Atualizar</button>
     </div>
+    <p class="muted">Cada combinação fornecedor + produto é considerada "migrada" quando a compra mais recente registrada para ela foi feita via contrato (em vez de cotação spot pontual).</p>
     <div id="resumo-cards" class="resumo-grid"></div>
 
-    <h2 class="mt">Avanço por contrato (em aberto)</h2>
+    <h2 class="mt">Evolução mensal do avanço</h2>
+    <div id="grafico-evolucao" class="chart-wrap"></div>
+
+    <h2 class="mt">Avanço por fornecedor</h2>
     <div class="table-wrap">
-      <table id="tbl-avanco">
+      <table id="tbl-fornecedor">
         <thead>
-          <tr><th>Nº Contrato</th><th>Contraparte</th><th>Produto</th><th>Volume total</th><th>Fixado</th><th>Avanço</th></tr>
+          <tr><th>Fornecedor</th><th>Produtos</th><th>Modalidade atual</th><th>Última compra</th></tr>
         </thead>
         <tbody></tbody>
       </table>
@@ -49,66 +54,110 @@
     <div class="table-wrap">
       <table id="tbl-produto">
         <thead>
-          <tr><th>Produto</th><th>Volume total</th><th>Fixado</th><th>Avanço</th></tr>
+          <tr><th>Produto</th><th>Relações migradas</th><th>Ainda em spot</th><th>Avanço</th></tr>
         </thead>
         <tbody></tbody>
       </table>
     </div>
   </section>
 
-  <!-- NOVO CONTRATO -->
-  <section id="tab-novo" class="tab-content">
-    <h2>Registrar contrato</h2>
-    <form id="form-contrato" class="form-card">
+  <!-- NOVA COMPRA -->
+  <section id="tab-nova" class="tab-content">
+    <h2>Registrar compra</h2>
+    <form id="form-compra" class="form-card">
       <label>
-        Número / referência do contrato
-        <input type="text" id="ct-numero" placeholder="Ex: CTR-2026-014" required>
-      </label>
-      <label>
-        Tipo
-        <select id="ct-tipo" required>
-          <option value="compra">Compra</option>
-          <option value="venda">Venda</option>
-        </select>
-      </label>
-      <label>
-        Contraparte
-        <select id="ct-contraparte" required></select>
+        Fornecedor
+        <select id="cp-fornecedor" required></select>
       </label>
       <label>
         Produto
-        <select id="ct-produto" required></select>
+        <select id="cp-produto" required></select>
       </label>
       <label>
-        Volume total contratado
-        <input type="number" id="ct-volume" step="0.01" min="0.01" placeholder="Ex: 5000" required>
+        Modalidade desta compra
+        <select id="cp-modalidade" required>
+          <option value="spot">Cotação spot (pontual)</option>
+          <option value="contrato">Contrato formal</option>
+        </select>
       </label>
       <label>
-        Data do contrato
-        <input type="date" id="ct-data" required>
+        Data
+        <input type="date" id="cp-data" required>
       </label>
       <label>
-        Preço de referência (opcional)
-        <input type="number" id="ct-preco-ref" step="0.01" min="0" placeholder="Ex: 1250.00">
+        Volume (opcional)
+        <input type="number" id="cp-volume" step="0.01" min="0" placeholder="Ex: 1200">
       </label>
       <label>
-        Observações (opcional)
-        <textarea id="ct-observacoes" rows="2"></textarea>
+        Valor total em R$ (opcional)
+        <input type="number" id="cp-valor" step="0.01" min="0" placeholder="Ex: 150000.00">
       </label>
-      <button type="submit" class="btn primary">Salvar contrato</button>
-      <p id="ct-feedback" class="feedback"></p>
+      <label>
+        Observação (opcional)
+        <input type="text" id="cp-obs">
+      </label>
+      <button type="submit" class="btn primary">Salvar compra</button>
+      <p id="cp-feedback" class="feedback"></p>
     </form>
+  </section>
+
+  <!-- IMPORTAR PDF -->
+  <section id="tab-importar" class="tab-content">
+    <h2>Importar pedido de compra (PDF)</h2>
+    <p class="muted">Anexe o PDF do pedido de compra — o sistema lê o fornecedor e os itens automaticamente. Você só confirma os dados e informa se foi via cotação spot ou contrato.</p>
+    <div class="form-card">
+      <label>
+        Arquivo PDF
+        <input type="file" id="pdf-arquivo" accept="application/pdf">
+      </label>
+      <button id="btn-ler-pdf" type="button" class="btn primary">Ler PDF</button>
+      <p id="pdf-feedback" class="feedback"></p>
+    </div>
+
+    <div id="pdf-revisao" class="hidden">
+      <h3 class="mt">Confirmar dados extraídos</h3>
+      <div class="form-card">
+        <label>
+          Fornecedor
+          <select id="pdf-fornecedor"></select>
+        </label>
+        <label>
+          Modalidade desta compra
+          <select id="pdf-modalidade">
+            <option value="spot">Cotação spot (pontual)</option>
+            <option value="contrato">Contrato formal</option>
+          </select>
+        </label>
+        <label>
+          Data
+          <input type="date" id="pdf-data">
+        </label>
+      </div>
+
+      <h3 class="mt">Itens encontrados</h3>
+      <div class="table-wrap">
+        <table id="tbl-pdf-itens">
+          <thead>
+            <tr><th></th><th>Produto</th><th>Quantidade</th><th>Unidade (lida)</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button id="btn-salvar-pdf" type="button" class="btn primary mt">Salvar compras selecionadas</button>
+      <p id="pdf-salvar-feedback" class="feedback"></p>
+    </div>
   </section>
 
   <!-- LISTA -->
   <section id="tab-lista" class="tab-content">
-    <h2>Todos os contratos</h2>
+    <h2>Todas as compras</h2>
     <div class="filters">
-      <select id="fil-status">
-        <option value="">Todos os status</option>
-        <option value="aberto">Aberto</option>
-        <option value="encerrado">Encerrado</option>
+      <select id="fil-modalidade">
+        <option value="">Todas as modalidades</option>
+        <option value="spot">Spot</option>
+        <option value="contrato">Contrato</option>
       </select>
+      <select id="fil-fornecedor"><option value="">Todos os fornecedores</option></select>
       <select id="fil-produto"><option value="">Todos os produtos</option></select>
       <button id="btn-filtrar-lista" class="btn secondary">Filtrar</button>
     </div>
@@ -116,13 +165,12 @@
       <table id="tbl-lista">
         <thead>
           <tr>
-            <th>Número</th>
-            <th>Tipo</th>
-            <th>Contraparte</th>
+            <th>Data</th>
+            <th>Fornecedor</th>
             <th>Produto</th>
-            <th>Volume total</th>
-            <th>Avanço</th>
-            <th>Status</th>
+            <th>Modalidade</th>
+            <th>Volume</th>
+            <th>Valor</th>
             <th></th>
           </tr>
         </thead>
@@ -136,6 +184,14 @@
     <h2>Configurações</h2>
     <div class="cadastro-grid">
       <div class="form-card">
+        <h3>Fornecedores</h3>
+        <form id="form-fornecedor" class="inline-form">
+          <input type="text" id="fornecedor-nome" placeholder="Nome do fornecedor" required>
+          <button type="submit" class="btn primary">Adicionar</button>
+        </form>
+        <ul id="lista-fornecedores" class="cadastro-lista"></ul>
+      </div>
+      <div class="form-card">
         <h3>Produtos</h3>
         <form id="form-produto" class="inline-form">
           <input type="text" id="produto-nome" placeholder="Nome do produto" required>
@@ -144,70 +200,10 @@
         </form>
         <ul id="lista-produtos" class="cadastro-lista"></ul>
       </div>
-      <div class="form-card">
-        <h3>Contrapartes (clientes / fornecedores)</h3>
-        <form id="form-contraparte" class="inline-form">
-          <input type="text" id="contraparte-nome" placeholder="Nome" required>
-          <button type="submit" class="btn primary">Adicionar</button>
-        </form>
-        <ul id="lista-contrapartes" class="cadastro-lista"></ul>
-      </div>
     </div>
   </section>
 
 </main>
-</div>
-
-<!-- MODAL DETALHES DO CONTRATO -->
-<div id="modal-overlay" class="modal-overlay hidden">
-  <div class="modal-card">
-    <div class="modal-head">
-      <h2 id="modal-titulo">Contrato</h2>
-      <button id="btn-modal-fechar" type="button" class="link-btn">Fechar ✕</button>
-    </div>
-    <div class="modal-form">
-      <div id="modal-resumo" class="modal-resumo"></div>
-      <div class="progress-wrap">
-        <div class="progress-bar"><div id="modal-progress-fill" class="progress-fill"></div></div>
-        <div id="modal-progress-label" class="progress-label"></div>
-      </div>
-
-      <h3 class="mt">Fixações registradas</h3>
-      <div class="table-wrap">
-        <table id="tbl-fixacoes">
-          <thead><tr><th>Data</th><th>Volume</th><th>Preço spot</th><th>Obs.</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-
-      <h3 class="mt">Registrar nova fixação</h3>
-      <form id="form-fixacao" class="form-card modal-form">
-        <label>
-          Data
-          <input type="date" id="fx-data" required>
-        </label>
-        <label>
-          Volume fixado
-          <input type="number" id="fx-volume" step="0.01" min="0.01" required>
-        </label>
-        <label>
-          Preço spot
-          <input type="number" id="fx-preco" step="0.01" min="0" required>
-        </label>
-        <label>
-          Observação (opcional)
-          <input type="text" id="fx-obs">
-        </label>
-        <button type="submit" class="btn primary">Adicionar fixação</button>
-        <p id="fx-feedback" class="feedback"></p>
-      </form>
-
-      <div class="modal-actions mt">
-        <button id="btn-modal-toggle-status" type="button" class="btn secondary">Encerrar contrato</button>
-        <button id="btn-modal-excluir" type="button" class="btn secondary danger">Excluir contrato</button>
-      </div>
-    </div>
-  </div>
 </div>
 
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
