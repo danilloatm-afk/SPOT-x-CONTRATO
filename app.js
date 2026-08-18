@@ -566,6 +566,28 @@ document.getElementById("btn-refresh-painel").addEventListener("click", loadPain
 const EXTRACT_PDF_URL = `${SUPABASE_URL}/functions/v1/rapid-action`;
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_4fZ0DlFJq1ec5xTXurwGSQ_Ke3JELGZ";
 let pdfExtraido = null; // { fornecedor_nome, itens: [{produto_nome, quantidade, unidade}] }
+let pedidoDuplicadoDetectado = false;
+
+async function checarPedidoDuplicado(numeroPedido) {
+  const aviso = document.getElementById("pdf-pedido-duplicado-aviso");
+  pedidoDuplicadoDetectado = false;
+  if (!numeroPedido) {
+    aviso.classList.add("hidden");
+    return;
+  }
+  const { data } = await comTimeout(db.from("cs_compras").select("data").eq("numero_pedido", numeroPedido).limit(1));
+  if (data && data.length) {
+    pedidoDuplicadoDetectado = true;
+    aviso.textContent = `⚠️ O pedido Nº ${numeroPedido} já foi importado antes (compra registrada em ${formatarData(data[0].data)}). Confira se não é duplicado antes de salvar.`;
+    aviso.classList.remove("hidden");
+  } else {
+    aviso.classList.add("hidden");
+  }
+}
+
+document.getElementById("pdf-numero-pedido").addEventListener("change", (e) => {
+  checarPedidoDuplicado(e.target.value.trim());
+});
 
 function arquivoParaBase64(file) {
   return new Promise((resolve, reject) => {
@@ -651,6 +673,8 @@ document.getElementById("btn-ler-pdf").addEventListener("click", async () => {
       ? `CNPJ lido do documento: ${pdfExtraido.fornecedor_cnpj}`
       : "";
     document.getElementById("pdf-data").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("pdf-numero-pedido").value = pdfExtraido.numero_pedido || "";
+    await checarPedidoDuplicado(pdfExtraido.numero_pedido);
     renderTabelaPdfItens();
     document.getElementById("pdf-revisao").classList.remove("hidden");
   } catch (err) {
@@ -690,6 +714,10 @@ function renderTabelaPdfItens() {
 
 document.getElementById("btn-salvar-pdf").addEventListener("click", async () => {
   const feedback = document.getElementById("pdf-salvar-feedback");
+  if (pedidoDuplicadoDetectado) {
+    const numeroPedido = document.getElementById("pdf-numero-pedido").value.trim();
+    if (!confirm(`O pedido Nº ${numeroPedido} já foi importado antes. Tem certeza que quer importar de novo mesmo assim?`)) return;
+  }
   feedback.textContent = "Salvando...";
   feedback.className = "feedback";
   try {
@@ -709,6 +737,7 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
 
     const modalidade = document.getElementById("pdf-modalidade").value;
     const data_compra = document.getElementById("pdf-data").value;
+    const numeroPedido = document.getElementById("pdf-numero-pedido").value.trim() || null;
     const linhas = Array.from(document.querySelectorAll("#tbl-pdf-itens tbody tr"));
 
     let salvos = 0;
@@ -737,6 +766,7 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
         modalidade,
         data: data_compra,
         volume: quantidade,
+        numero_pedido: numeroPedido,
       });
       if (erroCompra) throw erroCompra;
       salvos++;
@@ -747,7 +777,9 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
     document.getElementById("pdf-revisao").classList.add("hidden");
     document.getElementById("pdf-arquivo").value = "";
     document.getElementById("pdf-feedback").textContent = "";
+    document.getElementById("pdf-pedido-duplicado-aviso").classList.add("hidden");
     pdfExtraido = null;
+    pedidoDuplicadoDetectado = false;
     await recarregarApoio();
   } catch (err) {
     feedback.textContent = "Erro ao salvar: " + err.message;
