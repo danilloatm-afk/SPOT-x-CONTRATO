@@ -1,5 +1,5 @@
 const SUPABASE_URL = "https://jvfyqvefznkpcvjaerta.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2ZnlxdmVmem5rcGN2amFlcnRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyMTQ4NjgsImV4cCI6MjEwMTc5MDg2OH0.2Ef6LpZ61WM8myHBYeQGo3TuGqk5C3x36ER_sWRNPS4";
+const SUPABASE_ANON_KEY = "eyJhbGci••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••";
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const MODALIDADE_LABEL = { spot: "Spot", contrato: "Contrato" };
@@ -61,6 +61,11 @@ let todasComprasCache = []; // todas as compras, usado pelo painel
 function nomePor(cache, id) {
   const item = cache.find((x) => String(x.id) === String(id));
   return item ? item.nome : "—";
+}
+
+function codigoPor(cache, id) {
+  const item = cache.find((x) => String(x.id) === String(id));
+  return item ? item.codigo || "—" : "—";
 }
 
 // ---------- tabs ----------
@@ -249,7 +254,7 @@ function renderLista() {
   const tbody = document.querySelector("#tbl-lista tbody");
   document.getElementById("lista-marcar-todas").checked = false;
   if (!comprasCache.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Nenhuma compra encontrada.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">Nenhuma compra encontrada.</td></tr>';
     atualizarSelecaoLista();
     return;
   }
@@ -262,6 +267,7 @@ function renderLista() {
       <td>${escapeHtml(c.numero_pedido || "—")}</td>
       <td>${escapeHtml(nomePor(fornecedoresCache, c.fornecedor_id))}</td>
       <td>${escapeHtml(nomePor(produtosCache, c.produto_id))}</td>
+      <td>${escapeHtml(codigoPor(produtosCache, c.produto_id))}</td>
       <td><span class="badge modalidade-${c.modalidade}">${MODALIDADE_LABEL[c.modalidade]}</span></td>
       <td>${c.volume != null ? formatarNumero(c.volume, 0) : "—"}</td>
       <td>${c.valor != null ? "R$ " + formatarNumero(c.valor) : "—"}</td>
