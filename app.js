@@ -364,8 +364,35 @@ function evolucaoMensal(compras, meses = 6) {
   return pontos;
 }
 
-function renderGraficoEvolucao(pontos) {
-  const wrap = document.getElementById("grafico-evolucao");
+// % de fornecedores totalmente migrados (todos os produtos dele em contrato)
+// ao final de cada um dos últimos N meses — mesma visão cumulativa acima,
+// só que agrupada por fornecedor em vez de por relação fornecedor+produto.
+function evolucaoMensalFornecedores(compras, meses = 6) {
+  const hoje = new Date();
+  const pontos = [];
+  for (let i = meses - 1; i >= 0; i--) {
+    const refDate = new Date(hoje.getFullYear(), hoje.getMonth() - i + 1, 0); // último dia do mês
+    const refIso = refDate.toISOString().slice(0, 10);
+    const comprasAteMes = compras.filter((c) => c.data <= refIso);
+    const relacoes = relacoesFornecedorProduto(comprasAteMes);
+    const porFornecedor = {};
+    relacoes.forEach((r) => {
+      if (!porFornecedor[r.fornecedor_id]) porFornecedor[r.fornecedor_id] = [];
+      porFornecedor[r.fornecedor_id].push(r);
+    });
+    const fornecedoresIds = Object.keys(porFornecedor);
+    const migrados = fornecedoresIds.filter((id) => porFornecedor[id].every((r) => r.modalidade_atual === "contrato")).length;
+    const pct = fornecedoresIds.length > 0 ? (migrados / fornecedoresIds.length) * 100 : null;
+    pontos.push({
+      label: refDate.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }),
+      pct,
+    });
+  }
+  return pontos;
+}
+
+function renderGraficoEvolucao(pontos, containerId = "grafico-evolucao") {
+  const wrap = document.getElementById(containerId);
   if (!pontos.some((p) => p.pct !== null)) {
     wrap.innerHTML = '<div class="empty-state">Sem compras registradas ainda para calcular a evolução.</div>';
     return;
@@ -450,7 +477,8 @@ async function loadPainel() {
 
   const relacoes = relacoesFornecedorProduto(todasComprasCache);
   renderResumoCards(relacoes);
-  renderGraficoEvolucao(evolucaoMensal(todasComprasCache));
+  renderGraficoEvolucao(evolucaoMensal(todasComprasCache), "grafico-evolucao");
+  renderGraficoEvolucao(evolucaoMensalFornecedores(todasComprasCache), "grafico-evolucao-fornecedor");
   renderTabelaFornecedor(relacoes);
   renderTabelaProduto(relacoes);
 }
