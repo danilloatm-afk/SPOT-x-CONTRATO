@@ -3,12 +3,9 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // auth desativado: o app nunca faz login, só usa a chave pública — manter o
 // GoTrueClient padrão ligado só adiciona um lock de sessão no navegador que
 // pode travar as consultas (especialmente com várias abas do site abertas).
-console.log("[diag] criando client", Date.now(), "readyState:", document.readyState);
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 });
-window.__db = db;
-console.log("[diag] client criado", Date.now());
 
 const MODALIDADE_LABEL = { spot: "Spot", contrato: "Contrato" };
 
@@ -44,12 +41,6 @@ function escapeHtml(str) {
 }
 
 function comTimeout(promise, ms = 6000) {
-  const t0 = Date.now();
-  console.log("[diag] query iniciada", t0);
-  promise.then(
-    (r) => console.log("[diag] query resolveu em", Date.now() - t0, "ms", r.error || "ok", r.data ? r.data.length : null),
-    (e) => console.log("[diag] query REJEITOU em", Date.now() - t0, "ms", e)
-  );
   return Promise.race([
     promise,
     new Promise((resolve) => setTimeout(() => resolve({ data: null, error: { message: "timeout" } }), ms)),
@@ -942,13 +933,8 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
 });
 
 // ---------- inicialização ----------
-async function init() {
+(async function init() {
   await recarregarApoio();
   await loadMeta();
   await loadPainel();
-}
-// Pequena pausa antes da 1a consulta — evita um travamento observado no
-// cliente do Supabase quando a consulta é disparada cedo demais no ciclo de
-// carregamento da página (o "load" já pode ter ocorrido antes deste script
-// nem rodar, então um setTimeout garante o atraso de verdade).
-setTimeout(init, 300);
+})();
