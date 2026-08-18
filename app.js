@@ -391,7 +391,7 @@ function evolucaoMensalFornecedores(compras, meses = 6) {
   return pontos;
 }
 
-function renderGraficoEvolucao(pontos, containerId = "grafico-evolucao") {
+function renderGraficoEvolucao(pontos, containerId = "grafico-evolucao", mostrarMeta = true) {
   const wrap = document.getElementById(containerId);
   if (!pontos.some((p) => p.pct !== null)) {
     wrap.innerHTML = '<div class="empty-state">Sem compras registradas ainda para calcular a evolução.</div>';
@@ -416,7 +416,7 @@ function renderGraficoEvolucao(pontos, containerId = "grafico-evolucao") {
     )
     .join("");
   const metaLinha =
-    metaCache && metaCache.percentual != null
+    mostrarMeta && metaCache && metaCache.percentual != null
       ? `<div class="meta-linha" style="bottom:${Math.min(100, Math.max(0, metaCache.percentual))}%"><span class="meta-linha-label">Meta ${metaCache.percentual}%</span></div>`
       : "";
   wrap.innerHTML = `<div class="chart-bars">
@@ -478,7 +478,7 @@ async function loadPainel() {
   const relacoes = relacoesFornecedorProduto(todasComprasCache);
   renderResumoCards(relacoes);
   renderGraficoEvolucao(evolucaoMensal(todasComprasCache), "grafico-evolucao");
-  renderGraficoEvolucao(evolucaoMensalFornecedores(todasComprasCache), "grafico-evolucao-fornecedor");
+  renderGraficoEvolucao(evolucaoMensalFornecedores(todasComprasCache), "grafico-evolucao-fornecedor", false);
   renderTabelaFornecedor(relacoes);
   renderTabelaProduto(relacoes);
 }
