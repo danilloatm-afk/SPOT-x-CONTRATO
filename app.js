@@ -102,6 +102,8 @@ function preencherSelect(id, itens, placeholder, comTodos = false) {
   if (valorAtual) sel.value = valorAtual;
 }
 
+const FK_POR_TABELA = { cs_fornecedores: "fornecedor_id", cs_produtos: "produto_id" };
+
 function renderCadastroLista(id, itens, tabela) {
   const ul = document.getElementById(id);
   if (!itens.length) {
@@ -111,13 +113,24 @@ function renderCadastroLista(id, itens, tabela) {
   ul.innerHTML = itens
     .map((i) => {
       const detalhe = i.unidade ? `${i.unidade}${i.codigo ? ` · cód. ${i.codigo}` : ""}` : i.cnpj || "";
+      const outros = itens.filter((o) => o.id !== i.id);
+      const opcoesAlvo = outros.map((o) => `<option value="${o.id}">${escapeHtml(o.nome)}</option>`).join("");
       return `
-    <li class="${i.ativo ? "" : "inativo"}">
-      <span>${escapeHtml(i.nome)}${detalhe ? ` <span class="muted">(${escapeHtml(detalhe)})</span>` : ""}</span>
-      <span>
-        <button class="link-btn" data-acao="toggle" data-tabela="${tabela}" data-id="${i.id}" data-ativo="${i.ativo}">${i.ativo ? "Desativar" : "Ativar"}</button>
-        <button class="link-btn danger" data-acao="excluir" data-tabela="${tabela}" data-id="${i.id}">Excluir</button>
-      </span>
+    <li class="${i.ativo ? "" : "inativo"}" data-item-id="${i.id}">
+      <div class="cadastro-linha">
+        <span>${escapeHtml(i.nome)}${detalhe ? ` <span class="muted">(${escapeHtml(detalhe)})</span>` : ""}</span>
+        <span>
+          <button class="link-btn" data-acao="toggle" data-tabela="${tabela}" data-id="${i.id}" data-ativo="${i.ativo}">${i.ativo ? "Desativar" : "Ativar"}</button>
+          <button class="link-btn" data-acao="mesclar" data-id="${i.id}">Mesclar</button>
+          <button class="link-btn danger" data-acao="excluir" data-tabela="${tabela}" data-id="${i.id}">Excluir</button>
+        </span>
+      </div>
+      <div class="cadastro-mesclar-form hidden">
+        <span class="muted">Mesclar "${escapeHtml(i.nome)}" em:</span>
+        <select class="cadastro-mesclar-alvo">${opcoesAlvo}</select>
+        <button class="btn small primary" data-acao="confirmar-mesclagem" data-tabela="${tabela}" data-id="${i.id}">Confirmar</button>
+        <button class="btn small secondary" data-acao="cancelar-mesclagem">Cancelar</button>
+      </div>
     </li>`;
     })
     .join("");
@@ -128,13 +141,32 @@ document.querySelectorAll(".cadastro-lista").forEach((ul) => {
     const btn = e.target.closest("button[data-acao]");
     if (!btn) return;
     const { acao, tabela, id, ativo } = btn.dataset;
+
     if (acao === "toggle") {
       await db.from(tabela).update({ ativo: ativo !== "true" }).eq("id", id);
+      await recarregarApoio();
     } else if (acao === "excluir") {
       if (!confirm("Excluir este cadastro?")) return;
       await db.from(tabela).delete().eq("id", id);
+      await recarregarApoio();
+    } else if (acao === "mesclar") {
+      ul.querySelectorAll(".cadastro-mesclar-form").forEach((f) => f.classList.add("hidden"));
+      btn.closest("li").querySelector(".cadastro-mesclar-form").classList.remove("hidden");
+    } else if (acao === "cancelar-mesclagem") {
+      btn.closest(".cadastro-mesclar-form").classList.add("hidden");
+    } else if (acao === "confirmar-mesclagem") {
+      const li = btn.closest("li");
+      const alvoId = li.querySelector(".cadastro-mesclar-alvo").value;
+      const nomeOrigem = li.querySelector(".cadastro-linha span").textContent.trim();
+      if (!alvoId) return;
+      if (!confirm(`Mesclar "${nomeOrigem}" no cadastro selecionado? Todas as compras registradas serão movidas pro cadastro de destino, e "${nomeOrigem}" será excluído. Essa ação não pode ser desfeita.`)) return;
+      const fk = FK_POR_TABELA[tabela];
+      await db.from("cs_compras").update({ [fk]: alvoId }).eq(fk, id);
+      await db.from(tabela).delete().eq("id", id);
+      await recarregarApoio();
+      await loadPainel();
+      await loadLista();
     }
-    await recarregarApoio();
   });
 });
 
@@ -663,11 +695,14 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
   try {
     let fornecedorId = document.getElementById("pdf-fornecedor").value;
     if (fornecedorId === "novo") {
-      const { data, error } = await db
-        .from("cs_fornecedores")
-        .insert({ nome: pdfExtraido.fornecedor_nome, cnpj: pdfExtraido.fornecedor_cnpj || null })
-        .select()
-        .single();
+      const cnpj = pdfExtraido.fornecedor_cnpj || null;
+      const payload = { nome: pdfExtraido.fornecedor_nome, cnpj };
+      // Com CNPJ: upsert — se um fornecedor com esse CNPJ já existir (de uma
+      // importação anterior), reaproveita o cadastro em vez de duplicar.
+      const query = cnpj
+        ? db.from("cs_fornecedores").upsert(payload, { onConflict: "cnpj" })
+        : db.from("cs_fornecedores").insert(payload);
+      const { data, error } = await query.select().single();
       if (error) throw error;
       fornecedorId = data.id;
     }
@@ -684,11 +719,14 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
       const item = pdfExtraido.itens[idx];
       let produtoId = tr.querySelector(".pdf-item-produto").value;
       if (produtoId === "novo") {
-        const { data: novoProduto, error: erroProduto } = await db
-          .from("cs_produtos")
-          .insert({ nome: item.produto_nome, unidade: item.unidade || "un", codigo: item.produto_codigo || null })
-          .select()
-          .single();
+        const codigo = item.produto_codigo || null;
+        const payload = { nome: item.produto_nome, unidade: item.unidade || "un", codigo };
+        // Com código: upsert — se um produto com esse código já existir, reaproveita
+        // o cadastro em vez de duplicar (mesmo que o nome extraído varie um pouco).
+        const query = codigo
+          ? db.from("cs_produtos").upsert(payload, { onConflict: "codigo" })
+          : db.from("cs_produtos").insert(payload);
+        const { data: novoProduto, error: erroProduto } = await query.select().single();
         if (erroProduto) throw erroProduto;
         produtoId = novoProduto.id;
       }
