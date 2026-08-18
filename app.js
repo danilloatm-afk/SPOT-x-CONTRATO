@@ -96,7 +96,9 @@ function preencherSelect(id, itens, placeholder, comTodos = false) {
   const sel = document.getElementById(id);
   const valorAtual = sel.value;
   const ativos = itens.filter((i) => i.ativo);
-  sel.innerHTML = `<option value="">${placeholder}</option>` + ativos.map((i) => `<option value="${i.id}">${escapeHtml(i.nome)}</option>`).join("");
+  sel.innerHTML =
+    `<option value="">${placeholder}</option>` +
+    ativos.map((i) => `<option value="${i.id}">${escapeHtml(i.nome)}${i.cnpj ? ` — ${escapeHtml(i.cnpj)}` : ""}</option>`).join("");
   if (valorAtual) sel.value = valorAtual;
 }
 
@@ -107,16 +109,17 @@ function renderCadastroLista(id, itens, tabela) {
     return;
   }
   ul.innerHTML = itens
-    .map(
-      (i) => `
+    .map((i) => {
+      const detalhe = i.unidade ? `${i.unidade}${i.codigo ? ` · cód. ${i.codigo}` : ""}` : i.cnpj || "";
+      return `
     <li class="${i.ativo ? "" : "inativo"}">
-      <span>${escapeHtml(i.nome)}${i.unidade ? ` <span class="muted">(${escapeHtml(i.unidade)})</span>` : ""}</span>
+      <span>${escapeHtml(i.nome)}${detalhe ? ` <span class="muted">(${escapeHtml(detalhe)})</span>` : ""}</span>
       <span>
         <button class="link-btn" data-acao="toggle" data-tabela="${tabela}" data-id="${i.id}" data-ativo="${i.ativo}">${i.ativo ? "Desativar" : "Ativar"}</button>
         <button class="link-btn danger" data-acao="excluir" data-tabela="${tabela}" data-id="${i.id}">Excluir</button>
       </span>
-    </li>`
-    )
+    </li>`;
+    })
     .join("");
 }
 
@@ -143,9 +146,11 @@ async function recarregarApoio() {
 document.getElementById("form-fornecedor").addEventListener("submit", async (e) => {
   e.preventDefault();
   const nome = document.getElementById("fornecedor-nome").value.trim();
+  const cnpj = document.getElementById("fornecedor-cnpj").value.trim();
   if (!nome) return;
-  await db.from("cs_fornecedores").insert({ nome });
+  await db.from("cs_fornecedores").insert({ nome, cnpj: cnpj || null });
   document.getElementById("fornecedor-nome").value = "";
+  document.getElementById("fornecedor-cnpj").value = "";
   await loadFornecedores();
 });
 
@@ -153,10 +158,12 @@ document.getElementById("form-produto").addEventListener("submit", async (e) => 
   e.preventDefault();
   const nome = document.getElementById("produto-nome").value.trim();
   const unidade = document.getElementById("produto-unidade").value.trim();
+  const codigo = document.getElementById("produto-codigo").value.trim();
   if (!nome || !unidade) return;
-  await db.from("cs_produtos").insert({ nome, unidade });
+  await db.from("cs_produtos").insert({ nome, unidade, codigo: codigo || null });
   document.getElementById("produto-nome").value = "";
   document.getElementById("produto-unidade").value = "";
+  document.getElementById("produto-codigo").value = "";
   await loadProdutos();
 });
 
@@ -508,11 +515,36 @@ function encontrarPorNome(nome, cache) {
   return cache.find((i) => i.nome.trim().toLowerCase() === alvo) || null;
 }
 
-function preencherSelectComNovo(id, cache, nomeExtraido) {
+function apenasDigitos(str) {
+  return String(str || "").replace(/\D/g, "");
+}
+
+// CNPJ é um identificador único de verdade — prioriza ele sobre o nome
+// (que pode variar de um pedido pra outro) pra evitar cadastro duplicado.
+function encontrarFornecedor(nomeExtraido, cnpjExtraido, cache) {
+  const cnpjAlvo = apenasDigitos(cnpjExtraido);
+  if (cnpjAlvo) {
+    const porCnpj = cache.find((f) => f.cnpj && apenasDigitos(f.cnpj) === cnpjAlvo);
+    if (porCnpj) return porCnpj;
+  }
+  return encontrarPorNome(nomeExtraido, cache);
+}
+
+// Mesma lógica pro código do produto (SKU/referência).
+function encontrarProduto(nomeExtraido, codigoExtraido, cache) {
+  const codigoAlvo = String(codigoExtraido || "").trim().toLowerCase();
+  if (codigoAlvo) {
+    const porCodigo = cache.find((p) => p.codigo && p.codigo.trim().toLowerCase() === codigoAlvo);
+    if (porCodigo) return porCodigo;
+  }
+  return encontrarPorNome(nomeExtraido, cache);
+}
+
+function preencherSelectComNovo(id, cache, nomeExtraido, cnpjExtraido) {
   const sel = document.getElementById(id);
-  const match = encontrarPorNome(nomeExtraido, cache);
+  const match = encontrarFornecedor(nomeExtraido, cnpjExtraido, cache);
   const ativos = cache.filter((i) => i.ativo);
-  const opcoes = ativos.map((i) => `<option value="${i.id}">${escapeHtml(i.nome)}</option>`).join("");
+  const opcoes = ativos.map((i) => `<option value="${i.id}">${escapeHtml(i.nome)}${i.cnpj ? ` — ${escapeHtml(i.cnpj)}` : ""}</option>`).join("");
   sel.innerHTML = `<option value="novo">+ Novo: "${escapeHtml(nomeExtraido)}"</option>${opcoes}`;
   if (match) sel.value = String(match.id);
 }
@@ -547,7 +579,10 @@ document.getElementById("btn-ler-pdf").addEventListener("click", async () => {
     feedback.textContent = `Lido com sucesso: ${pdfExtraido.itens.length} item(ns) encontrado(s). Confira abaixo.`;
     feedback.className = "feedback success";
 
-    preencherSelectComNovo("pdf-fornecedor", fornecedoresCache, pdfExtraido.fornecedor_nome);
+    preencherSelectComNovo("pdf-fornecedor", fornecedoresCache, pdfExtraido.fornecedor_nome, pdfExtraido.fornecedor_cnpj);
+    document.getElementById("pdf-fornecedor-cnpj-info").textContent = pdfExtraido.fornecedor_cnpj
+      ? `CNPJ lido do documento: ${pdfExtraido.fornecedor_cnpj}`
+      : "";
     document.getElementById("pdf-data").value = new Date().toISOString().slice(0, 10);
     renderTabelaPdfItens();
     document.getElementById("pdf-revisao").classList.remove("hidden");
@@ -560,11 +595,10 @@ document.getElementById("btn-ler-pdf").addEventListener("click", async () => {
 function renderTabelaPdfItens() {
   const tbody = document.querySelector("#tbl-pdf-itens tbody");
   const ativos = produtosCache.filter((p) => p.ativo);
-  const opcoesBase = ativos.map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join("");
+  const opcoesBase = ativos.map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}${p.codigo ? ` — ${escapeHtml(p.codigo)}` : ""}</option>`).join("");
   tbody.innerHTML = pdfExtraido.itens
-    .map((item, idx) => {
-      const match = encontrarPorNome(item.produto_nome, produtosCache);
-      return `
+    .map(
+      (item, idx) => `
     <tr data-idx="${idx}">
       <td><input type="checkbox" class="pdf-item-incluir" checked></td>
       <td>
@@ -573,14 +607,16 @@ function renderTabelaPdfItens() {
           ${opcoesBase}
         </select>
       </td>
+      <td>${escapeHtml(item.produto_codigo || "—")}</td>
       <td><input type="number" class="pdf-item-quantidade" step="0.01" min="0" value="${item.quantidade}"></td>
       <td>${escapeHtml(item.unidade || "—")}</td>
-    </tr>`;
-    })
+    </tr>`
+    )
     .join("");
   document.querySelectorAll("#tbl-pdf-itens tbody tr").forEach((tr) => {
     const idx = Number(tr.dataset.idx);
-    const match = encontrarPorNome(pdfExtraido.itens[idx].produto_nome, produtosCache);
+    const item = pdfExtraido.itens[idx];
+    const match = encontrarProduto(item.produto_nome, item.produto_codigo, produtosCache);
     if (match) tr.querySelector(".pdf-item-produto").value = String(match.id);
   });
 }
@@ -592,7 +628,11 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
   try {
     let fornecedorId = document.getElementById("pdf-fornecedor").value;
     if (fornecedorId === "novo") {
-      const { data, error } = await db.from("cs_fornecedores").insert({ nome: pdfExtraido.fornecedor_nome }).select().single();
+      const { data, error } = await db
+        .from("cs_fornecedores")
+        .insert({ nome: pdfExtraido.fornecedor_nome, cnpj: pdfExtraido.fornecedor_cnpj || null })
+        .select()
+        .single();
       if (error) throw error;
       fornecedorId = data.id;
     }
@@ -611,7 +651,7 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
       if (produtoId === "novo") {
         const { data: novoProduto, error: erroProduto } = await db
           .from("cs_produtos")
-          .insert({ nome: item.produto_nome, unidade: item.unidade || "un" })
+          .insert({ nome: item.produto_nome, unidade: item.unidade || "un", codigo: item.produto_codigo || null })
           .select()
           .single();
         if (erroProduto) throw erroProduto;
