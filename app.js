@@ -411,7 +411,8 @@ function renderTabelaProduto(relacoes) {
 document.getElementById("btn-refresh-painel").addEventListener("click", loadPainel);
 
 // ---------- importar pedido de compra (PDF) ----------
-const EXTRACT_PDF_URL = `${SUPABASE_URL}/functions/v1/extract-pedido`;
+const EXTRACT_PDF_URL = `${SUPABASE_URL}/functions/v1/rapid-action`;
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_4fZ0DlFJq1ec5xTXurwGSQ_Ke3JELGZ";
 let pdfExtraido = null; // { fornecedor_nome, itens: [{produto_nome, quantidade, unidade}] }
 
 function arquivoParaBase64(file) {
@@ -456,8 +457,8 @@ document.getElementById("btn-ler-pdf").addEventListener("click", async () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        apikey: SUPABASE_ANON_KEY,
-        authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
       },
       body: JSON.stringify({ pdf_base64: pdfBase64 }),
     });
