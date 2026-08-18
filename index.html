@@ -1,166 +1,262 @@
-// Edge Function: extract-pedido
-//
-// Recebe um PDF de pedido de compra (base64) e usa a API da Anthropic
-// (Claude Sonnet 5) para extrair o fornecedor e os itens (produto,
-// quantidade, unidade, valor). Roda no servidor para manter a chave da API
-// da Anthropic secreta — nunca é exposta ao navegador.
-//
-// Configuração necessária antes de usar:
-//   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-// (ou via Supabase Dashboard → Edge Functions → extract-pedido → Secrets)
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Avanço para Contratos</title>
+<link rel="stylesheet" href="style.css">
+<meta name="theme-color" content="#4338c5">
+</head>
+<body>
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+<div id="app-shell">
+<header class="topbar">
+  <div class="topbar-title-row">
+    <h1>📈 Avanço para Contratos</h1>
+    <div class="topbar-actions">
+      <button id="btn-theme-toggle" type="button" class="btn secondary small theme-toggle" title="Alternar modo claro/escuro">🌙</button>
+    </div>
+  </div>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="painel">Painel</button>
+    <button class="tab-btn" data-tab="nova">Nova Compra</button>
+    <button class="tab-btn" data-tab="importar">Importar PDF</button>
+    <button class="tab-btn" data-tab="lista">Compras</button>
+    <button class="tab-btn" data-tab="config">Configurações</button>
+  </nav>
+</header>
 
-const EXTRACTION_SCHEMA = {
-  type: "object",
-  properties: {
-    fornecedor_nome: {
-      type: "string",
-      description:
-        "APENAS o nome/razão social do FORNECEDOR/VENDEDOR — a empresa que está VENDENDO/FORNECENDO os produtos ou serviços listados. " +
-        "NUNCA é a empresa que emitiu o pedido de compra (a compradora) — essa deve ser ignorada. " +
-        "O fornecedor costuma aparecer perto de rótulos como 'Fornecedor', 'Vendedor', 'Razão Social do Fornecedor' ou 'Favorecido'. " +
-        "IMPORTANTE: não inclua o rótulo do campo no valor (ex: se o documento diz 'Razão Social: XPTO LTDA', o valor deve ser apenas 'XPTO LTDA', sem o prefixo 'Razão Social:').",
-    },
-    fornecedor_cnpj: {
-      type: "string",
-      description:
-        "CNPJ do FORNECEDOR/VENDEDOR — NUNCA o CNPJ da empresa compradora/emissora do pedido. " +
-        "ATENÇÃO: o documento normalmente tem DOIS números de CNPJ, um pra cada empresa (comprador e vendedor), às vezes em posições " +
-        "que confundem (um deles pode aparecer sozinho numa linha, longe do nome da empresa a que pertence). Antes de escolher, " +
-        "confirme a qual das duas empresas cada CNPJ pertence pelo contexto ao redor (endereço, IE, bairro), não apenas pela posição " +
-        "na página. Se houver dúvida real sobre qual CNPJ é do fornecedor, prefira omitir a preencher com o CNPJ errado.",
-    },
-    numero_pedido: {
-      type: "string",
-      description:
-        "Número/código identificador deste pedido de compra específico (não é o código de um produto). Costuma aparecer perto de " +
-        "rótulos como 'Pedido de Compras Nº', 'Nº do Pedido', 'Pedido Nº', 'N° Pedido' ou similar, geralmente no topo do documento. " +
-        "Omita se não encontrar um número que identifique claramente o pedido como um todo.",
-    },
-    itens: {
-      type: "array",
-      description: "Cada linha de item/produto do pedido — inclua TODAS as linhas da tabela de itens, mesmo que sejam muitas.",
-      items: {
-        type: "object",
-        properties: {
-          produto_nome: { type: "string", description: "Nome do produto ou item" },
-          produto_codigo: {
-            type: "string",
-            description:
-              "Código/SKU/referência/item do produto. Procure com atenção uma coluna como 'Código', 'Cód.', 'Ref.', 'SKU' ou 'Item' " +
-              "na tabela de itens — costuma existir mesmo em pedidos com muitas linhas. Omita apenas se realmente não houver essa coluna no documento.",
-          },
-          quantidade: { type: "number", description: "Quantidade numérica do item" },
-          unidade: { type: "string", description: "Unidade de medida (ex: saca, kg, ton, un)" },
-          valor_total: {
-            type: "number",
-            description:
-              "Valor total em R$ desta linha (coluna 'Valor Total', ou 'Valor Unitário' × quantidade se só houver o unitário). " +
-              "Use apenas números (sem 'R$', sem separador de milhar) — ex: 45390.00, não '45.390,00'. Omita se não encontrar valor pra essa linha.",
-          },
-        },
-        required: ["produto_nome", "quantidade", "unidade"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["fornecedor_nome", "itens"],
-  additionalProperties: false,
-};
+<main>
 
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: CORS_HEADERS });
-  }
+  <!-- PAINEL -->
+  <section id="tab-painel" class="tab-content active">
+    <div class="section-head">
+      <h2>Indicador: migração de cotação spot para contrato</h2>
+      <button id="btn-refresh-painel" class="btn secondary">Atualizar</button>
+    </div>
+    <p class="muted">Cada combinação fornecedor + produto é considerada "migrada" quando a compra mais recente registrada para ela foi feita via contrato (em vez de cotação spot pontual).</p>
+    <div id="resumo-cards" class="resumo-grid"></div>
 
-  try {
-    const { pdf_base64 } = await req.json();
-    if (!pdf_base64 || typeof pdf_base64 !== "string") {
-      return jsonResponse({ error: "Campo pdf_base64 ausente ou inválido." }, 400);
-    }
+    <h2 class="mt">🎯 Sugestões de migração para contrato</h2>
+    <p class="muted">Itens ainda em spot com mais compras repetidas — fortes candidatos a virar contrato.</p>
+    <div class="filters">
+      <input type="text" id="filtro-sugestao-painel" placeholder="Buscar fornecedor ou produto...">
+    </div>
+    <div class="table-wrap table-wrap-scroll">
+      <table id="tbl-sugestao">
+        <thead>
+          <tr><th>Fornecedor</th><th>Produto</th><th>Compras em spot</th><th>Volume total</th><th>Valor total</th><th>Desde</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
 
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!apiKey) {
-      return jsonResponse({ error: "ANTHROPIC_API_KEY não configurada no servidor." }, 500);
-    }
+    <h2 class="mt">Evolução mensal do avanço (por item)</h2>
+    <p class="muted">% de combinações fornecedor+produto já migradas.</p>
+    <div id="grafico-evolucao" class="chart-wrap"></div>
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-5",
-        max_tokens: 8192,
-        output_config: { format: { type: "json_schema", schema: EXTRACTION_SCHEMA } },
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "document",
-                source: { type: "base64", media_type: "application/pdf", data: pdf_base64 },
-              },
-              {
-                type: "text",
-                text:
-                  "Extraia os dados deste pedido de compra. Atenção a dois pontos importantes:\n\n" +
-                  "1) FORNECEDOR: este documento tem DUAS empresas — a que EMITE o pedido (compradora, é a dona do sistema/pedido, " +
-                  "costuma aparecer como 'Empresa:') e a que vai VENDER/ENTREGAR a mercadoria (a fornecedora de verdade, costuma " +
-                  "aparecer como 'Razão Social:', 'Fornecedor:' ou 'Favorecido:'). Extraia sempre a fornecedora/vendedora, NUNCA a " +
-                  "empresa que emitiu/está comprando. Isso vale tanto pro NOME quanto pro CNPJ — o documento tem dois CNPJs (um de " +
-                  "cada empresa), às vezes um deles aparece sozinho numa linha sem o nome da empresa do lado. Confirme pelo endereço/IE " +
-                  "ao redor a qual empresa cada CNPJ pertence antes de escolher o do fornecedor.\n\n" +
-                  "2) CÓDIGO DO PRODUTO: a tabela de itens muitas vezes tem uma coluna chamada 'Produto' (ou 'Item', 'Cód. Produto') que " +
-                  "na verdade contém um CÓDIGO NUMÉRICO, e uma coluna separada 'Descrição' com o nome real do item. Nesse caso, use o " +
-                  "valor da coluna numérica como produto_codigo e o texto da coluna 'Descrição' como produto_nome — não deixe de extrair " +
-                  "o código só porque a coluna não se chama literalmente 'Código'.\n\n" +
-                  "3) PRECISÃO: este documento pode ter fonte pequena/densa. Leia cada código numérico e cada linha da tabela com " +
-                  "muito cuidado, dígito por dígito — não invente nem aproxime números. Cada linha da tabela é um item diferente; " +
-                  "não misture o texto ou o código de uma linha com o de outra. Se não conseguir ler algum dígito com certeza, é " +
-                  "melhor omitir o produto_codigo daquele item do que arriscar um valor errado.\n\n" +
-                  "4) VALOR: se a tabela tiver uma coluna de valor (ex: 'Valor Total', 'Total', 'Vl. Total'), extraia o valor_total " +
-                  "de cada linha. Se só houver 'Valor Unitário', multiplique pela quantidade da linha. Sempre em números puros, sem " +
-                  "'R$' e sem separador de milhar (ex: 45390.00). Se a linha realmente não tiver nenhum valor no documento, omita o campo.",
-              },
-            ],
-          },
-        ],
-      }),
-    });
+    <h2 class="mt">Evolução mensal do avanço (por fornecedor)</h2>
+    <p class="muted">% de fornecedores totalmente migrados (todos os produtos dele já em contrato).</p>
+    <div id="grafico-evolucao-fornecedor" class="chart-wrap"></div>
 
-    const data = await response.json();
+    <h2 class="mt">Avanço por fornecedor</h2>
+    <p class="muted">Ordenado para priorizar quem ainda está preso em cotação spot há mais tempo.</p>
+    <div class="filters">
+      <input type="text" id="filtro-fornecedor-painel" placeholder="Buscar fornecedor...">
+    </div>
+    <div class="table-wrap table-wrap-scroll">
+      <table id="tbl-fornecedor">
+        <thead>
+          <tr><th>Fornecedor</th><th>Produtos</th><th>Modalidade atual</th><th>Tempo em spot</th><th>Última compra</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
 
-    if (!response.ok) {
-      return jsonResponse({ error: data?.error?.message || "Erro ao chamar a API da Anthropic." }, 502);
-    }
+    <h2 class="mt">Avanço por produto</h2>
+    <div class="filters">
+      <input type="text" id="filtro-produto-painel" placeholder="Buscar produto...">
+    </div>
+    <div class="table-wrap table-wrap-scroll">
+      <table id="tbl-produto">
+        <thead>
+          <tr><th>Produto</th><th>Relações migradas</th><th>Ainda em spot</th><th>Avanço</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
 
-    if (data.stop_reason === "refusal") {
-      return jsonResponse({ error: "O modelo recusou processar este documento." }, 422);
-    }
+  <!-- NOVA COMPRA -->
+  <section id="tab-nova" class="tab-content">
+    <h2>Registrar compra</h2>
+    <form id="form-compra" class="form-card">
+      <label>
+        Fornecedor
+        <select id="cp-fornecedor" required></select>
+      </label>
+      <label>
+        Produto
+        <select id="cp-produto" required></select>
+      </label>
+      <label>
+        Modalidade desta compra
+        <select id="cp-modalidade" required>
+          <option value="spot">Cotação spot (pontual)</option>
+          <option value="contrato">Contrato formal</option>
+        </select>
+      </label>
+      <label>
+        Data
+        <input type="date" id="cp-data" required>
+      </label>
+      <label>
+        Volume (opcional)
+        <input type="number" id="cp-volume" step="0.01" min="0" placeholder="Ex: 1200">
+      </label>
+      <label>
+        Valor total em R$ (opcional)
+        <input type="number" id="cp-valor" step="0.01" min="0" placeholder="Ex: 150000.00">
+      </label>
+      <label>
+        Observação (opcional)
+        <input type="text" id="cp-obs">
+      </label>
+      <button type="submit" class="btn primary">Salvar compra</button>
+      <p id="cp-feedback" class="feedback"></p>
+    </form>
+  </section>
 
-    const textBlock = (data.content || []).find((b: { type: string }) => b.type === "text");
-    if (!textBlock) {
-      return jsonResponse({ error: "Resposta inesperada do modelo (sem texto)." }, 502);
-    }
+  <!-- IMPORTAR PDF -->
+  <section id="tab-importar" class="tab-content">
+    <h2>Importar pedido de compra (PDF)</h2>
+    <p class="muted">Anexe o PDF do pedido de compra — o sistema lê o fornecedor e os itens automaticamente. Você só confirma os dados e informa se foi via cotação spot ou contrato.</p>
+    <div class="form-card">
+      <label>
+        Arquivo PDF
+        <input type="file" id="pdf-arquivo" accept="application/pdf">
+      </label>
+      <button id="btn-ler-pdf" type="button" class="btn primary">Ler PDF</button>
+      <p id="pdf-feedback" class="feedback"></p>
+    </div>
 
-    const extraido = JSON.parse(textBlock.text);
-    return jsonResponse({ data: extraido }, 200);
-  } catch (err) {
-    return jsonResponse({ error: err instanceof Error ? err.message : "Erro desconhecido." }, 500);
-  }
-});
+    <div id="pdf-revisao" class="hidden">
+      <h3 class="mt">Confirmar dados extraídos</h3>
+      <div class="form-card">
+        <label>
+          Fornecedor
+          <select id="pdf-fornecedor"></select>
+        </label>
+        <p id="pdf-fornecedor-cnpj-info" class="muted"></p>
+        <label>
+          Modalidade desta compra
+          <select id="pdf-modalidade">
+            <option value="spot">Cotação spot (pontual)</option>
+            <option value="contrato">Contrato formal</option>
+          </select>
+        </label>
+        <label>
+          Data
+          <input type="date" id="pdf-data">
+        </label>
+        <label>
+          Número do pedido (lido do PDF, opcional)
+          <input type="text" id="pdf-numero-pedido" placeholder="Ex: S48268">
+        </label>
+        <p id="pdf-pedido-duplicado-aviso" class="feedback error hidden"></p>
+      </div>
 
-function jsonResponse(body: unknown, status: number) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "content-type": "application/json" },
-  });
-}
+      <h3 class="mt">Itens encontrados</h3>
+      <div class="table-wrap">
+        <table id="tbl-pdf-itens">
+          <thead>
+            <tr><th></th><th>Produto</th><th>Código</th><th>Quantidade</th><th>Unidade (lida)</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button id="btn-salvar-pdf" type="button" class="btn primary mt">Salvar compras selecionadas</button>
+      <p id="pdf-salvar-feedback" class="feedback"></p>
+    </div>
+  </section>
+
+  <!-- LISTA -->
+  <section id="tab-lista" class="tab-content">
+    <h2>Todas as compras</h2>
+    <div class="filters">
+      <select id="fil-modalidade">
+        <option value="">Todas as modalidades</option>
+        <option value="spot">Spot</option>
+        <option value="contrato">Contrato</option>
+      </select>
+      <select id="fil-fornecedor"><option value="">Todos os fornecedores</option></select>
+      <select id="fil-produto"><option value="">Todos os produtos</option></select>
+      <button id="btn-filtrar-lista" class="btn secondary">Filtrar</button>
+    </div>
+    <div class="section-head">
+      <span id="lista-selecionadas-info" class="muted"></span>
+      <button id="btn-excluir-selecionadas" type="button" class="btn secondary danger hidden">Excluir selecionadas</button>
+    </div>
+    <div class="table-wrap">
+      <table id="tbl-lista">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="lista-marcar-todas"></th>
+            <th>Data</th>
+            <th>Nº Pedido</th>
+            <th>Fornecedor</th>
+            <th>Produto</th>
+            <th>Modalidade</th>
+            <th>Volume</th>
+            <th>Valor</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- CONFIG -->
+  <section id="tab-config" class="tab-content">
+    <h2>Configurações</h2>
+    <div class="cadastro-grid">
+      <div class="form-card">
+        <h3>Fornecedores</h3>
+        <form id="form-fornecedor" class="inline-form">
+          <input type="text" id="fornecedor-nome" placeholder="Nome do fornecedor" required>
+          <input type="text" id="fornecedor-cnpj" placeholder="CNPJ (opcional)">
+          <button type="submit" class="btn primary">Adicionar</button>
+        </form>
+        <ul id="lista-fornecedores" class="cadastro-lista"></ul>
+      </div>
+      <div class="form-card">
+        <h3>Produtos</h3>
+        <form id="form-produto" class="inline-form">
+          <input type="text" id="produto-nome" placeholder="Nome do produto" required>
+          <input type="text" id="produto-unidade" placeholder="Unidade (ex: saca 60kg)" required>
+          <input type="text" id="produto-codigo" placeholder="Código (opcional)">
+          <button type="submit" class="btn primary">Adicionar</button>
+        </form>
+        <ul id="lista-produtos" class="cadastro-lista"></ul>
+      </div>
+      <div class="form-card">
+        <h3>Meta de avanço</h3>
+        <p class="muted">Opcional — define um objetivo de % migrado até uma data, exibido no Painel.</p>
+        <form id="form-meta" class="inline-form">
+          <input type="number" id="meta-percentual" step="1" min="0" max="100" placeholder="% meta (ex: 80)">
+          <input type="date" id="meta-data">
+          <button type="submit" class="btn primary">Salvar meta</button>
+        </form>
+        <p id="meta-feedback" class="feedback"></p>
+      </div>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="app.js"></script>
+</body>
+</html>
