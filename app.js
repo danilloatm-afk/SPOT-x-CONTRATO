@@ -477,6 +477,7 @@ async function loadPainel() {
 
   const relacoes = relacoesFornecedorProduto(todasComprasCache);
   renderResumoCards(relacoes);
+  renderTabelaSugestoes(relacoes);
   renderGraficoEvolucao(evolucaoMensal(todasComprasCache), "grafico-evolucao");
   renderGraficoEvolucao(evolucaoMensalFornecedores(todasComprasCache), "grafico-evolucao-fornecedor", false);
   renderTabelaFornecedor(relacoes);
@@ -518,6 +519,69 @@ function renderResumoCards(relacoes) {
 function diasDesde(dataIso) {
   return Math.max(0, Math.round((Date.now() - new Date(dataIso + "T00:00:00")) / 86400000));
 }
+
+// Candidatos a migração: relações ainda em spot, rankeadas por número de
+// compras spot registradas (recorrência) — quanto mais vezes comprou pontual,
+// mais forte o sinal de que vale a pena negociar um contrato.
+const MIN_COMPRAS_SUGESTAO = 2;
+let linhasSugestaoFull = [];
+
+function calcularSugestoesMigracao(relacoes) {
+  return relacoes
+    .filter((r) => r.modalidade_atual === "spot")
+    .map((r) => {
+      const comprasSpot = todasComprasCache.filter(
+        (c) => String(c.fornecedor_id) === String(r.fornecedor_id) && String(c.produto_id) === String(r.produto_id) && c.modalidade === "spot"
+      );
+      const numeroComprasSpot = comprasSpot.length;
+      const volumeTotalSpot = comprasSpot.reduce((soma, c) => soma + Number(c.volume || 0), 0);
+      const primeiraCompraSpot = comprasSpot.reduce((min, c) => (c.data < min ? c.data : min), comprasSpot[0]?.data);
+      return {
+        fornecedorNome: nomePor(fornecedoresCache, r.fornecedor_id),
+        produtoNome: nomePor(produtosCache, r.produto_id),
+        numeroComprasSpot,
+        volumeTotalSpot,
+        primeiraCompraSpot,
+      };
+    })
+    .filter((s) => s.numeroComprasSpot >= MIN_COMPRAS_SUGESTAO)
+    .sort((a, b) => b.numeroComprasSpot - a.numeroComprasSpot || b.volumeTotalSpot - a.volumeTotalSpot);
+}
+
+function renderTabelaSugestoes(relacoes) {
+  linhasSugestaoFull = calcularSugestoesMigracao(relacoes);
+  renderLinhasSugestaoVisiveis();
+}
+
+function renderLinhasSugestaoVisiveis() {
+  const tbody = document.querySelector("#tbl-sugestao tbody");
+  const filtro = document.getElementById("filtro-sugestao-painel").value.trim().toLowerCase();
+  const filtradas = filtro
+    ? linhasSugestaoFull.filter((s) => s.fornecedorNome.toLowerCase().includes(filtro) || s.produtoNome.toLowerCase().includes(filtro))
+    : linhasSugestaoFull;
+
+  if (!filtradas.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">${
+      linhasSugestaoFull.length ? "Nenhum item encontrado." : `Nenhum item com ${MIN_COMPRAS_SUGESTAO}+ compras repetidas em spot ainda.`
+    }</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtradas
+    .map(
+      (s) => `
+    <tr>
+      <td>${escapeHtml(s.fornecedorNome)}</td>
+      <td>${escapeHtml(s.produtoNome)}</td>
+      <td>${s.numeroComprasSpot}</td>
+      <td>${formatarNumero(s.volumeTotalSpot, 0)}</td>
+      <td>${formatarData(s.primeiraCompraSpot)}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+document.getElementById("filtro-sugestao-painel").addEventListener("input", renderLinhasSugestaoVisiveis);
 
 let linhasFornecedorFull = [];
 let linhasProdutoFull = [];

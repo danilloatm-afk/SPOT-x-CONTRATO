@@ -37,6 +37,20 @@
     <p class="muted">Cada combinação fornecedor + produto é considerada "migrada" quando a compra mais recente registrada para ela foi feita via contrato (em vez de cotação spot pontual).</p>
     <div id="resumo-cards" class="resumo-grid"></div>
 
+    <h2 class="mt">🎯 Sugestões de migração para contrato</h2>
+    <p class="muted">Itens ainda em spot com mais compras repetidas — fortes candidatos a virar contrato.</p>
+    <div class="filters">
+      <input type="text" id="filtro-sugestao-painel" placeholder="Buscar fornecedor ou produto...">
+    </div>
+    <div class="table-wrap table-wrap-scroll">
+      <table id="tbl-sugestao">
+        <thead>
+          <tr><th>Fornecedor</th><th>Produto</th><th>Compras em spot</th><th>Volume total</th><th>Desde</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
     <h2 class="mt">Evolução mensal do avanço (por item)</h2>
     <p class="muted">% de combinações fornecedor+produto já migradas.</p>
     <div id="grafico-evolucao" class="chart-wrap"></div>
