@@ -41,10 +41,11 @@
     <div id="grafico-evolucao" class="chart-wrap"></div>
 
     <h2 class="mt">Avanço por fornecedor</h2>
+    <p class="muted">Ordenado para priorizar quem ainda está preso em cotação spot há mais tempo.</p>
     <div class="table-wrap">
       <table id="tbl-fornecedor">
         <thead>
-          <tr><th>Fornecedor</th><th>Produtos</th><th>Modalidade atual</th><th>Última compra</th></tr>
+          <tr><th>Fornecedor</th><th>Produtos</th><th>Modalidade atual</th><th>Tempo em spot</th><th>Última compra</th></tr>
         </thead>
         <tbody></tbody>
       </table>
@@ -199,6 +200,16 @@
           <button type="submit" class="btn primary">Adicionar</button>
         </form>
         <ul id="lista-produtos" class="cadastro-lista"></ul>
+      </div>
+      <div class="form-card">
+        <h3>Meta de avanço</h3>
+        <p class="muted">Opcional — define um objetivo de % migrado até uma data, exibido no Painel.</p>
+        <form id="form-meta" class="inline-form">
+          <input type="number" id="meta-percentual" step="1" min="0" max="100" placeholder="% meta (ex: 80)">
+          <input type="date" id="meta-data">
+          <button type="submit" class="btn primary">Salvar meta</button>
+        </form>
+        <p id="meta-feedback" class="feedback"></p>
       </div>
     </div>
   </section>

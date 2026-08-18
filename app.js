@@ -295,17 +295,32 @@ function renderGraficoEvolucao(pontos) {
     wrap.innerHTML = '<div class="empty-state">Sem compras registradas ainda para calcular a evolução.</div>';
     return;
   }
-  wrap.innerHTML = `<div class="chart-bars">${pontos
+  const tracks = pontos
     .map((p) => {
       const altura = p.pct === null ? 0 : Math.max(2, p.pct);
       return `
-      <div class="chart-col">
-        <div class="chart-col-value">${p.pct === null ? "—" : Math.round(p.pct) + "%"}</div>
+      <div class="chart-track-col">
         <div class="chart-col-bar-track"><div class="chart-col-bar" style="height:${altura}%"></div></div>
-        <div class="chart-col-label">${escapeHtml(p.label)}</div>
       </div>`;
     })
-    .join("")}</div>`;
+    .join("");
+  const labels = pontos
+    .map(
+      (p) => `
+      <div class="chart-label-col">
+        <div class="chart-col-value">${p.pct === null ? "—" : Math.round(p.pct) + "%"}</div>
+        <div class="chart-col-label">${escapeHtml(p.label)}</div>
+      </div>`
+    )
+    .join("");
+  const metaLinha =
+    metaCache && metaCache.percentual != null
+      ? `<div class="meta-linha" style="bottom:${Math.min(100, Math.max(0, metaCache.percentual))}%"><span class="meta-linha-label">Meta ${metaCache.percentual}%</span></div>`
+      : "";
+  wrap.innerHTML = `<div class="chart-bars">
+    <div class="chart-tracks-wrap">${tracks}${metaLinha}</div>
+    <div class="chart-labels-row">${labels}</div>
+  </div>`;
 }
 
 function progressoHtml(pct) {
@@ -317,6 +332,41 @@ function progressoHtml(pct) {
       <div class="progress-label">${arredondado}%</div>
     </div>`;
 }
+
+// ---------- meta de avanço ----------
+let metaCache = null; // { percentual, data }
+
+async function loadMeta() {
+  const { data, error } = await comTimeout(db.from("cs_config").select("*").eq("id", true).maybeSingle());
+  metaCache = error || !data ? null : { percentual: data.meta_percentual, data: data.meta_data };
+  if (metaCache) {
+    document.getElementById("meta-percentual").value = metaCache.percentual ?? "";
+    document.getElementById("meta-data").value = metaCache.data ?? "";
+  }
+}
+
+document.getElementById("form-meta").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const feedback = document.getElementById("meta-feedback");
+  const percentual = document.getElementById("meta-percentual").value;
+  const data_meta = document.getElementById("meta-data").value;
+  feedback.textContent = "Salvando...";
+  feedback.className = "feedback";
+  const { error } = await db.from("cs_config").upsert({
+    id: true,
+    meta_percentual: percentual ? Number(percentual) : null,
+    meta_data: data_meta || null,
+  });
+  if (error) {
+    feedback.textContent = "Erro ao salvar: " + error.message;
+    feedback.className = "feedback error";
+    return;
+  }
+  feedback.textContent = "Meta salva.";
+  feedback.className = "feedback success";
+  await loadMeta();
+  await loadPainel();
+});
 
 // ---------- painel ----------
 async function loadPainel() {
@@ -340,6 +390,17 @@ function renderResumoCards(relacoes) {
     { label: "Avanço geral da migração", valor: `${Math.round(pct * 10) / 10}%`, cls: pct >= 70 ? "ok" : "" },
   ];
 
+  if (metaCache && metaCache.percentual != null) {
+    const faltam = Math.max(0, Math.round((metaCache.percentual - pct) * 10) / 10);
+    const bateu = pct >= metaCache.percentual;
+    const prazo = metaCache.data ? ` até ${formatarData(metaCache.data)}` : "";
+    cards.push({
+      label: `Meta: ${metaCache.percentual}%${prazo}`,
+      valor: bateu ? "Atingida ✓" : `Faltam ${faltam} p.p.`,
+      cls: bateu ? "ok" : "atrasado",
+    });
+  }
+
   document.getElementById("resumo-cards").innerHTML = cards
     .map(
       (c) => `
@@ -351,6 +412,10 @@ function renderResumoCards(relacoes) {
     .join("");
 }
 
+function diasDesde(dataIso) {
+  return Math.max(0, Math.round((Date.now() - new Date(dataIso + "T00:00:00")) / 86400000));
+}
+
 function renderTabelaFornecedor(relacoes) {
   const tbody = document.querySelector("#tbl-fornecedor tbody");
   const porFornecedor = {};
@@ -358,27 +423,40 @@ function renderTabelaFornecedor(relacoes) {
     if (!porFornecedor[r.fornecedor_id]) porFornecedor[r.fornecedor_id] = [];
     porFornecedor[r.fornecedor_id].push(r);
   });
-  const linhas = Object.entries(porFornecedor);
+  let linhas = Object.entries(porFornecedor).map(([fornecedorId, doFornecedor]) => {
+    const produtos = doFornecedor.map((r) => nomePor(produtosCache, r.produto_id)).join(", ");
+    const todasContrato = doFornecedor.every((r) => r.modalidade_atual === "contrato");
+    const todasSpot = doFornecedor.every((r) => r.modalidade_atual === "spot");
+    const statusLabel = todasContrato ? "Contrato" : todasSpot ? "Spot" : "Parcial";
+    const statusClasse = todasContrato ? "modalidade-contrato" : "modalidade-spot";
+    const ultimaCompra = doFornecedor.reduce((max, r) => (r.data_ultima_compra > max ? r.data_ultima_compra : max), doFornecedor[0].data_ultima_compra);
+    const comprasFornecedor = todasComprasCache.filter((c) => String(c.fornecedor_id) === String(fornecedorId));
+    const primeiraCompra = comprasFornecedor.reduce((min, c) => (c.data < min ? c.data : min), comprasFornecedor[0]?.data || ultimaCompra);
+    const diasEmSpot = todasContrato ? null : diasDesde(primeiraCompra);
+    return { fornecedorId, produtos, statusLabel, statusClasse, ultimaCompra, diasEmSpot };
+  });
+  linhas.sort((a, b) => {
+    const aContrato = a.statusLabel === "Contrato" ? 1 : 0;
+    const bContrato = b.statusLabel === "Contrato" ? 1 : 0;
+    if (aContrato !== bContrato) return aContrato - bContrato;
+    if (aContrato === 0) return (b.diasEmSpot || 0) - (a.diasEmSpot || 0);
+    return 0;
+  });
   if (!linhas.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sem dados ainda.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Sem dados ainda.</td></tr>';
     return;
   }
   tbody.innerHTML = linhas
-    .map(([fornecedorId, doFornecedor]) => {
-      const produtos = doFornecedor.map((r) => nomePor(produtosCache, r.produto_id)).join(", ");
-      const todasContrato = doFornecedor.every((r) => r.modalidade_atual === "contrato");
-      const todasSpot = doFornecedor.every((r) => r.modalidade_atual === "spot");
-      const statusLabel = todasContrato ? "Contrato" : todasSpot ? "Spot" : "Parcial";
-      const statusClasse = todasContrato ? "modalidade-contrato" : todasSpot ? "modalidade-spot" : "modalidade-spot";
-      const ultimaCompra = doFornecedor.reduce((max, r) => (r.data_ultima_compra > max ? r.data_ultima_compra : max), doFornecedor[0].data_ultima_compra);
-      return `
+    .map(
+      (l) => `
     <tr>
-      <td>${escapeHtml(nomePor(fornecedoresCache, fornecedorId))}</td>
-      <td>${escapeHtml(produtos)}</td>
-      <td><span class="badge ${statusClasse}">${statusLabel}</span></td>
-      <td>${formatarData(ultimaCompra)}</td>
-    </tr>`;
-    })
+      <td>${escapeHtml(nomePor(fornecedoresCache, l.fornecedorId))}</td>
+      <td>${escapeHtml(l.produtos)}</td>
+      <td><span class="badge ${l.statusClasse}">${l.statusLabel}</span></td>
+      <td>${l.diasEmSpot === null ? "—" : `${l.diasEmSpot} dias`}</td>
+      <td>${formatarData(l.ultimaCompra)}</td>
+    </tr>`
+    )
     .join("");
 }
 
@@ -567,5 +645,6 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
 // ---------- inicialização ----------
 (async function init() {
   await recarregarApoio();
+  await loadMeta();
   await loadPainel();
 })();
