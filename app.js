@@ -531,4 +531,399 @@ function calcularSugestoesMigracao(relacoes) {
     .filter((r) => r.modalidade_atual === "spot")
     .map((r) => {
       const comprasSpot = todasComprasCache.filter(
-        (c) => String(c.fornecedor_id) === String(r.
+        (c) => String(c.fornecedor_id) === String(r.fornecedor_id) && String(c.produto_id) === String(r.produto_id) && c.modalidade === "spot"
+      );
+      const numeroComprasSpot = comprasSpot.length;
+      const volumeTotalSpot = comprasSpot.reduce((soma, c) => soma + Number(c.volume || 0), 0);
+      const primeiraCompraSpot = comprasSpot.reduce((min, c) => (c.data < min ? c.data : min), comprasSpot[0]?.data);
+      const temValor = comprasSpot.some((c) => c.valor != null);
+      const valorTotalSpot = comprasSpot.reduce((soma, c) => soma + Number(c.valor || 0), 0);
+      return {
+        fornecedorNome: nomePor(fornecedoresCache, r.fornecedor_id),
+        produtoNome: nomePor(produtosCache, r.produto_id),
+        numeroComprasSpot,
+        volumeTotalSpot,
+        primeiraCompraSpot,
+        temValor,
+        valorTotalSpot,
+      };
+    })
+    .filter((s) => s.numeroComprasSpot >= MIN_COMPRAS_SUGESTAO)
+    .sort((a, b) => b.numeroComprasSpot - a.numeroComprasSpot || b.volumeTotalSpot - a.volumeTotalSpot);
+}
+
+function renderTabelaSugestoes(relacoes) {
+  linhasSugestaoFull = calcularSugestoesMigracao(relacoes);
+  renderLinhasSugestaoVisiveis();
+}
+
+function renderLinhasSugestaoVisiveis() {
+  const tbody = document.querySelector("#tbl-sugestao tbody");
+  const filtro = document.getElementById("filtro-sugestao-painel").value.trim().toLowerCase();
+  const filtradas = filtro
+    ? linhasSugestaoFull.filter((s) => s.fornecedorNome.toLowerCase().includes(filtro) || s.produtoNome.toLowerCase().includes(filtro))
+    : linhasSugestaoFull;
+
+  if (!filtradas.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">${
+      linhasSugestaoFull.length ? "Nenhum item encontrado." : `Nenhum item com ${MIN_COMPRAS_SUGESTAO}+ compras repetidas em spot ainda.`
+    }</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtradas
+    .map(
+      (s) => `
+    <tr>
+      <td>${escapeHtml(s.fornecedorNome)}</td>
+      <td>${escapeHtml(s.produtoNome)}</td>
+      <td>${s.numeroComprasSpot}</td>
+      <td>${formatarNumero(s.volumeTotalSpot, 0)}</td>
+      <td>${s.temValor ? "R$ " + formatarNumero(s.valorTotalSpot) : "—"}</td>
+      <td>${formatarData(s.primeiraCompraSpot)}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+document.getElementById("filtro-sugestao-painel").addEventListener("input", renderLinhasSugestaoVisiveis);
+
+let linhasFornecedorFull = [];
+let linhasProdutoFull = [];
+
+function renderTabelaFornecedor(relacoes) {
+  const porFornecedor = {};
+  relacoes.forEach((r) => {
+    if (!porFornecedor[r.fornecedor_id]) porFornecedor[r.fornecedor_id] = [];
+    porFornecedor[r.fornecedor_id].push(r);
+  });
+  let linhas = Object.entries(porFornecedor).map(([fornecedorId, doFornecedor]) => {
+    const produtos = doFornecedor.map((r) => nomePor(produtosCache, r.produto_id)).join(", ");
+    const todasContrato = doFornecedor.every((r) => r.modalidade_atual === "contrato");
+    const todasSpot = doFornecedor.every((r) => r.modalidade_atual === "spot");
+    const statusLabel = todasContrato ? "Contrato" : todasSpot ? "Spot" : "Parcial";
+    const statusClasse = todasContrato ? "modalidade-contrato" : "modalidade-spot";
+    const ultimaCompra = doFornecedor.reduce((max, r) => (r.data_ultima_compra > max ? r.data_ultima_compra : max), doFornecedor[0].data_ultima_compra);
+    const comprasFornecedor = todasComprasCache.filter((c) => String(c.fornecedor_id) === String(fornecedorId));
+    const primeiraCompra = comprasFornecedor.reduce((min, c) => (c.data < min ? c.data : min), comprasFornecedor[0]?.data || ultimaCompra);
+    const diasEmSpot = todasContrato ? null : diasDesde(primeiraCompra);
+    const nome = nomePor(fornecedoresCache, fornecedorId);
+    return { fornecedorId, nome, produtos, statusLabel, statusClasse, ultimaCompra, diasEmSpot };
+  });
+  linhas.sort((a, b) => {
+    const aContrato = a.statusLabel === "Contrato" ? 1 : 0;
+    const bContrato = b.statusLabel === "Contrato" ? 1 : 0;
+    if (aContrato !== bContrato) return aContrato - bContrato;
+    if (aContrato === 0) return (b.diasEmSpot || 0) - (a.diasEmSpot || 0);
+    return 0;
+  });
+  linhasFornecedorFull = linhas;
+  renderLinhasFornecedorVisiveis();
+}
+
+function renderLinhasFornecedorVisiveis() {
+  const tbody = document.querySelector("#tbl-fornecedor tbody");
+  const filtro = document.getElementById("filtro-fornecedor-painel").value.trim().toLowerCase();
+  const filtradas = filtro ? linhasFornecedorFull.filter((l) => l.nome.toLowerCase().includes(filtro)) : linhasFornecedorFull;
+
+  if (!filtradas.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">${linhasFornecedorFull.length ? "Nenhum fornecedor encontrado." : "Sem dados ainda."}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtradas
+    .map(
+      (l) => `
+    <tr>
+      <td>${escapeHtml(l.nome)}</td>
+      <td>${escapeHtml(l.produtos)}</td>
+      <td><span class="badge ${l.statusClasse}">${l.statusLabel}</span></td>
+      <td>${l.diasEmSpot === null ? "—" : `${l.diasEmSpot} dias`}</td>
+      <td>${formatarData(l.ultimaCompra)}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+document.getElementById("filtro-fornecedor-painel").addEventListener("input", renderLinhasFornecedorVisiveis);
+
+function renderTabelaProduto(relacoes) {
+  const porProduto = {};
+  relacoes.forEach((r) => {
+    if (!porProduto[r.produto_id]) porProduto[r.produto_id] = [];
+    porProduto[r.produto_id].push(r);
+  });
+  let linhas = Object.entries(porProduto).map(([produtoId, doProduto]) => {
+    const { migradas, aindaSpot, pct } = calcularAvanco(doProduto);
+    const nome = nomePor(produtosCache, produtoId);
+    return { produtoId, nome, migradas, aindaSpot, pct };
+  });
+  linhas.sort((a, b) => {
+    const aSpot = a.aindaSpot > 0 ? 0 : 1;
+    const bSpot = b.aindaSpot > 0 ? 0 : 1;
+    if (aSpot !== bSpot) return aSpot - bSpot;
+    return a.pct - b.pct;
+  });
+  linhasProdutoFull = linhas;
+  renderLinhasProdutoVisiveis();
+}
+
+function renderLinhasProdutoVisiveis() {
+  const tbody = document.querySelector("#tbl-produto tbody");
+  const filtro = document.getElementById("filtro-produto-painel").value.trim().toLowerCase();
+  const filtradas = filtro ? linhasProdutoFull.filter((l) => l.nome.toLowerCase().includes(filtro)) : linhasProdutoFull;
+
+  if (!filtradas.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-state">${linhasProdutoFull.length ? "Nenhum produto encontrado." : "Sem dados ainda."}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtradas
+    .map(
+      (l) => `
+    <tr>
+      <td>${escapeHtml(l.nome)}</td>
+      <td>${l.migradas}</td>
+      <td>${l.aindaSpot}</td>
+      <td>${progressoHtml(l.pct)}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+document.getElementById("filtro-produto-painel").addEventListener("input", renderLinhasProdutoVisiveis);
+
+document.getElementById("btn-refresh-painel").addEventListener("click", loadPainel);
+
+// ---------- importar pedido de compra (PDF) ----------
+const EXTRACT_PDF_URL = `${SUPABASE_URL}/functions/v1/rapid-action`;
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_4fZ0DlFJq1ec5xTXurwGSQ_Ke3JELGZ";
+let pdfExtraido = null; // { fornecedor_nome, itens: [{produto_nome, quantidade, unidade}] }
+let pedidoDuplicadoDetectado = false;
+
+async function checarPedidoDuplicado(numeroPedido) {
+  const aviso = document.getElementById("pdf-pedido-duplicado-aviso");
+  pedidoDuplicadoDetectado = false;
+  if (!numeroPedido) {
+    aviso.classList.add("hidden");
+    return;
+  }
+  const { data } = await comTimeout(db.from("cs_compras").select("data").eq("numero_pedido", numeroPedido).limit(1));
+  if (data && data.length) {
+    pedidoDuplicadoDetectado = true;
+    aviso.textContent = `⚠️ O pedido Nº ${numeroPedido} já foi importado antes (compra registrada em ${formatarData(data[0].data)}). Confira se não é duplicado antes de salvar.`;
+    aviso.classList.remove("hidden");
+  } else {
+    aviso.classList.add("hidden");
+  }
+}
+
+document.getElementById("pdf-numero-pedido").addEventListener("change", (e) => {
+  checarPedidoDuplicado(e.target.value.trim());
+});
+
+function arquivoParaBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Não foi possível ler o arquivo"));
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.readAsDataURL(file);
+  });
+}
+
+function encontrarPorNome(nome, cache) {
+  const alvo = String(nome || "").trim().toLowerCase();
+  if (!alvo) return null;
+  return cache.find((i) => i.nome.trim().toLowerCase() === alvo) || null;
+}
+
+function apenasDigitos(str) {
+  return String(str || "").replace(/\D/g, "");
+}
+
+// CNPJ é um identificador único de verdade — prioriza ele sobre o nome
+// (que pode variar de um pedido pra outro) pra evitar cadastro duplicado.
+function encontrarFornecedor(nomeExtraido, cnpjExtraido, cache) {
+  const cnpjAlvo = apenasDigitos(cnpjExtraido);
+  if (cnpjAlvo) {
+    const porCnpj = cache.find((f) => f.cnpj && apenasDigitos(f.cnpj) === cnpjAlvo);
+    if (porCnpj) return porCnpj;
+  }
+  return encontrarPorNome(nomeExtraido, cache);
+}
+
+// Mesma lógica pro código do produto (SKU/referência).
+function encontrarProduto(nomeExtraido, codigoExtraido, cache) {
+  const codigoAlvo = String(codigoExtraido || "").trim().toLowerCase();
+  if (codigoAlvo) {
+    const porCodigo = cache.find((p) => p.codigo && p.codigo.trim().toLowerCase() === codigoAlvo);
+    if (porCodigo) return porCodigo;
+  }
+  return encontrarPorNome(nomeExtraido, cache);
+}
+
+function preencherSelectComNovo(id, cache, nomeExtraido, cnpjExtraido) {
+  const sel = document.getElementById(id);
+  const match = encontrarFornecedor(nomeExtraido, cnpjExtraido, cache);
+  const ativos = cache.filter((i) => i.ativo);
+  const opcoes = ativos.map((i) => `<option value="${i.id}">${escapeHtml(i.nome)}${i.cnpj ? ` — ${escapeHtml(i.cnpj)}` : ""}</option>`).join("");
+  sel.innerHTML = `<option value="novo">+ Novo: "${escapeHtml(nomeExtraido)}"</option>${opcoes}`;
+  if (match) sel.value = String(match.id);
+}
+
+document.getElementById("btn-ler-pdf").addEventListener("click", async () => {
+  const input = document.getElementById("pdf-arquivo");
+  const feedback = document.getElementById("pdf-feedback");
+  const file = input.files && input.files[0];
+  if (!file) {
+    feedback.textContent = "Selecione um arquivo PDF primeiro.";
+    feedback.className = "feedback error";
+    return;
+  }
+  feedback.textContent = "Lendo PDF (pode levar alguns segundos)...";
+  feedback.className = "feedback";
+  document.getElementById("pdf-revisao").classList.add("hidden");
+  try {
+    const pdfBase64 = await arquivoParaBase64(file);
+    const resp = await fetch(EXTRACT_PDF_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({ pdf_base64: pdfBase64 }),
+    });
+    const resultado = await resp.json();
+    if (!resp.ok || resultado.error) throw new Error(resultado.error || "Falha ao ler o PDF.");
+
+    pdfExtraido = resultado.data;
+    feedback.textContent = `Lido com sucesso: ${pdfExtraido.itens.length} item(ns) encontrado(s). Confira abaixo.`;
+    feedback.className = "feedback success";
+
+    preencherSelectComNovo("pdf-fornecedor", fornecedoresCache, pdfExtraido.fornecedor_nome, pdfExtraido.fornecedor_cnpj);
+    document.getElementById("pdf-fornecedor-cnpj-info").textContent = pdfExtraido.fornecedor_cnpj
+      ? `CNPJ lido do documento: ${pdfExtraido.fornecedor_cnpj}`
+      : "";
+    document.getElementById("pdf-data").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("pdf-numero-pedido").value = pdfExtraido.numero_pedido || "";
+    await checarPedidoDuplicado(pdfExtraido.numero_pedido);
+    renderTabelaPdfItens();
+    document.getElementById("pdf-revisao").classList.remove("hidden");
+  } catch (err) {
+    feedback.textContent = "Erro: " + err.message;
+    feedback.className = "feedback error";
+  }
+});
+
+function renderTabelaPdfItens() {
+  const tbody = document.querySelector("#tbl-pdf-itens tbody");
+  const ativos = produtosCache.filter((p) => p.ativo);
+  const opcoesBase = ativos.map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}${p.codigo ? ` — ${escapeHtml(p.codigo)}` : ""}</option>`).join("");
+  tbody.innerHTML = pdfExtraido.itens
+    .map(
+      (item, idx) => `
+    <tr data-idx="${idx}">
+      <td><input type="checkbox" class="pdf-item-incluir" checked></td>
+      <td>
+        <select class="pdf-item-produto">
+          <option value="novo">+ Novo: "${escapeHtml(item.produto_nome)}"</option>
+          ${opcoesBase}
+        </select>
+      </td>
+      <td>${escapeHtml(item.produto_codigo || "—")}</td>
+      <td><input type="number" class="pdf-item-quantidade" step="0.01" min="0" value="${item.quantidade}"></td>
+      <td>${escapeHtml(item.unidade || "—")}</td>
+    </tr>`
+    )
+    .join("");
+  document.querySelectorAll("#tbl-pdf-itens tbody tr").forEach((tr) => {
+    const idx = Number(tr.dataset.idx);
+    const item = pdfExtraido.itens[idx];
+    const match = encontrarProduto(item.produto_nome, item.produto_codigo, produtosCache);
+    if (match) tr.querySelector(".pdf-item-produto").value = String(match.id);
+  });
+}
+
+document.getElementById("btn-salvar-pdf").addEventListener("click", async () => {
+  const feedback = document.getElementById("pdf-salvar-feedback");
+  if (pedidoDuplicadoDetectado) {
+    const numeroPedido = document.getElementById("pdf-numero-pedido").value.trim();
+    if (!confirm(`O pedido Nº ${numeroPedido} já foi importado antes. Tem certeza que quer importar de novo mesmo assim?`)) return;
+  }
+  feedback.textContent = "Salvando...";
+  feedback.className = "feedback";
+  try {
+    let fornecedorId = document.getElementById("pdf-fornecedor").value;
+    if (fornecedorId === "novo") {
+      const cnpj = pdfExtraido.fornecedor_cnpj || null;
+      const payload = { nome: pdfExtraido.fornecedor_nome, cnpj };
+      // Com CNPJ: upsert — se um fornecedor com esse CNPJ já existir (de uma
+      // importação anterior), reaproveita o cadastro em vez de duplicar.
+      const query = cnpj
+        ? db.from("cs_fornecedores").upsert(payload, { onConflict: "cnpj" })
+        : db.from("cs_fornecedores").insert(payload);
+      const { data, error } = await query.select().single();
+      if (error) throw error;
+      fornecedorId = data.id;
+    }
+
+    const modalidade = document.getElementById("pdf-modalidade").value;
+    const data_compra = document.getElementById("pdf-data").value;
+    const numeroPedido = document.getElementById("pdf-numero-pedido").value.trim() || null;
+    const linhas = Array.from(document.querySelectorAll("#tbl-pdf-itens tbody tr"));
+
+    let salvos = 0;
+    for (const tr of linhas) {
+      const incluir = tr.querySelector(".pdf-item-incluir").checked;
+      if (!incluir) continue;
+      const idx = Number(tr.dataset.idx);
+      const item = pdfExtraido.itens[idx];
+      let produtoId = tr.querySelector(".pdf-item-produto").value;
+      if (produtoId === "novo") {
+        const codigo = item.produto_codigo || null;
+        const payload = { nome: item.produto_nome, unidade: item.unidade || "un", codigo };
+        // Com código: upsert — se um produto com esse código já existir, reaproveita
+        // o cadastro em vez de duplicar (mesmo que o nome extraído varie um pouco).
+        const query = codigo
+          ? db.from("cs_produtos").upsert(payload, { onConflict: "codigo" })
+          : db.from("cs_produtos").insert(payload);
+        const { data: novoProduto, error: erroProduto } = await query.select().single();
+        if (erroProduto) throw erroProduto;
+        produtoId = novoProduto.id;
+      }
+      const quantidade = Number(tr.querySelector(".pdf-item-quantidade").value);
+      const { error: erroCompra } = await db.from("cs_compras").insert({
+        fornecedor_id: fornecedorId,
+        produto_id: produtoId,
+        modalidade,
+        data: data_compra,
+        volume: quantidade,
+        valor: item.valor_total != null ? Number(item.valor_total) : null,
+        numero_pedido: numeroPedido,
+      });
+      if (erroCompra) throw erroCompra;
+      salvos++;
+    }
+
+    feedback.textContent = `${salvos} compra(s) salva(s) com sucesso.`;
+    feedback.className = "feedback success";
+    document.getElementById("pdf-revisao").classList.add("hidden");
+    document.getElementById("pdf-arquivo").value = "";
+    document.getElementById("pdf-feedback").textContent = "";
+    document.getElementById("pdf-pedido-duplicado-aviso").classList.add("hidden");
+    pdfExtraido = null;
+    pedidoDuplicadoDetectado = false;
+    await recarregarApoio();
+  } catch (err) {
+    feedback.textContent = "Erro ao salvar: " + err.message;
+    feedback.className = "feedback error";
+  }
+});
+
+// ---------- inicialização ----------
+(async function init() {
+  await recarregarApoio();
+  await loadMeta();
+  await loadPainel();
+})();
