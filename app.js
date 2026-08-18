@@ -249,7 +249,7 @@ function renderLista() {
   const tbody = document.querySelector("#tbl-lista tbody");
   document.getElementById("lista-marcar-todas").checked = false;
   if (!comprasCache.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Nenhuma compra encontrada.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Nenhuma compra encontrada.</td></tr>';
     atualizarSelecaoLista();
     return;
   }
@@ -259,6 +259,7 @@ function renderLista() {
     <tr>
       <td><input type="checkbox" class="lista-marcar" data-id="${c.id}"></td>
       <td>${formatarData(c.data)}</td>
+      <td>${escapeHtml(c.numero_pedido || "—")}</td>
       <td>${escapeHtml(nomePor(fornecedoresCache, c.fornecedor_id))}</td>
       <td>${escapeHtml(nomePor(produtosCache, c.produto_id))}</td>
       <td><span class="badge modalidade-${c.modalidade}">${MODALIDADE_LABEL[c.modalidade]}</span></td>
