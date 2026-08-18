@@ -491,8 +491,13 @@ function diasDesde(dataIso) {
   return Math.max(0, Math.round((Date.now() - new Date(dataIso + "T00:00:00")) / 86400000));
 }
 
+const LIMITE_PAINEL = 10;
+let linhasFornecedorFull = [];
+let mostrarTodosFornecedor = false;
+let linhasProdutoFull = [];
+let mostrarTodosProduto = false;
+
 function renderTabelaFornecedor(relacoes) {
-  const tbody = document.querySelector("#tbl-fornecedor tbody");
   const porFornecedor = {};
   relacoes.forEach((r) => {
     if (!porFornecedor[r.fornecedor_id]) porFornecedor[r.fornecedor_id] = [];
@@ -508,7 +513,8 @@ function renderTabelaFornecedor(relacoes) {
     const comprasFornecedor = todasComprasCache.filter((c) => String(c.fornecedor_id) === String(fornecedorId));
     const primeiraCompra = comprasFornecedor.reduce((min, c) => (c.data < min ? c.data : min), comprasFornecedor[0]?.data || ultimaCompra);
     const diasEmSpot = todasContrato ? null : diasDesde(primeiraCompra);
-    return { fornecedorId, produtos, statusLabel, statusClasse, ultimaCompra, diasEmSpot };
+    const nome = nomePor(fornecedoresCache, fornecedorId);
+    return { fornecedorId, nome, produtos, statusLabel, statusClasse, ultimaCompra, diasEmSpot };
   });
   linhas.sort((a, b) => {
     const aContrato = a.statusLabel === "Contrato" ? 1 : 0;
@@ -517,15 +523,28 @@ function renderTabelaFornecedor(relacoes) {
     if (aContrato === 0) return (b.diasEmSpot || 0) - (a.diasEmSpot || 0);
     return 0;
   });
-  if (!linhas.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Sem dados ainda.</td></tr>';
+  linhasFornecedorFull = linhas;
+  renderLinhasFornecedorVisiveis();
+}
+
+function renderLinhasFornecedorVisiveis() {
+  const tbody = document.querySelector("#tbl-fornecedor tbody");
+  const btnMostrarTodos = document.getElementById("btn-mostrar-todos-fornecedor");
+  const filtro = document.getElementById("filtro-fornecedor-painel").value.trim().toLowerCase();
+  const filtradas = filtro ? linhasFornecedorFull.filter((l) => l.nome.toLowerCase().includes(filtro)) : linhasFornecedorFull;
+
+  if (!filtradas.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">${linhasFornecedorFull.length ? "Nenhum fornecedor encontrado." : "Sem dados ainda."}</td></tr>`;
+    btnMostrarTodos.classList.add("hidden");
     return;
   }
-  tbody.innerHTML = linhas
+
+  const visiveis = mostrarTodosFornecedor ? filtradas : filtradas.slice(0, LIMITE_PAINEL);
+  tbody.innerHTML = visiveis
     .map(
       (l) => `
     <tr>
-      <td>${escapeHtml(nomePor(fornecedoresCache, l.fornecedorId))}</td>
+      <td>${escapeHtml(l.nome)}</td>
       <td>${escapeHtml(l.produtos)}</td>
       <td><span class="badge ${l.statusClasse}">${l.statusLabel}</span></td>
       <td>${l.diasEmSpot === null ? "—" : `${l.diasEmSpot} dias`}</td>
@@ -533,33 +552,80 @@ function renderTabelaFornecedor(relacoes) {
     </tr>`
     )
     .join("");
+
+  if (filtradas.length > LIMITE_PAINEL) {
+    btnMostrarTodos.classList.remove("hidden");
+    btnMostrarTodos.textContent = mostrarTodosFornecedor ? "Mostrar menos" : `Mostrar todos (${filtradas.length})`;
+  } else {
+    btnMostrarTodos.classList.add("hidden");
+  }
 }
 
+document.getElementById("filtro-fornecedor-painel").addEventListener("input", renderLinhasFornecedorVisiveis);
+document.getElementById("btn-mostrar-todos-fornecedor").addEventListener("click", () => {
+  mostrarTodosFornecedor = !mostrarTodosFornecedor;
+  renderLinhasFornecedorVisiveis();
+});
+
 function renderTabelaProduto(relacoes) {
-  const tbody = document.querySelector("#tbl-produto tbody");
   const porProduto = {};
   relacoes.forEach((r) => {
     if (!porProduto[r.produto_id]) porProduto[r.produto_id] = [];
     porProduto[r.produto_id].push(r);
   });
-  const linhas = Object.entries(porProduto);
-  if (!linhas.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Sem dados ainda.</td></tr>';
+  let linhas = Object.entries(porProduto).map(([produtoId, doProduto]) => {
+    const { migradas, aindaSpot, pct } = calcularAvanco(doProduto);
+    const nome = nomePor(produtosCache, produtoId);
+    return { produtoId, nome, migradas, aindaSpot, pct };
+  });
+  linhas.sort((a, b) => {
+    const aSpot = a.aindaSpot > 0 ? 0 : 1;
+    const bSpot = b.aindaSpot > 0 ? 0 : 1;
+    if (aSpot !== bSpot) return aSpot - bSpot;
+    return a.pct - b.pct;
+  });
+  linhasProdutoFull = linhas;
+  renderLinhasProdutoVisiveis();
+}
+
+function renderLinhasProdutoVisiveis() {
+  const tbody = document.querySelector("#tbl-produto tbody");
+  const btnMostrarTodos = document.getElementById("btn-mostrar-todos-produto");
+  const filtro = document.getElementById("filtro-produto-painel").value.trim().toLowerCase();
+  const filtradas = filtro ? linhasProdutoFull.filter((l) => l.nome.toLowerCase().includes(filtro)) : linhasProdutoFull;
+
+  if (!filtradas.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-state">${linhasProdutoFull.length ? "Nenhum produto encontrado." : "Sem dados ainda."}</td></tr>`;
+    btnMostrarTodos.classList.add("hidden");
     return;
   }
-  tbody.innerHTML = linhas
-    .map(([produtoId, doProduto]) => {
-      const { migradas, aindaSpot, pct } = calcularAvanco(doProduto);
-      return `
+
+  const visiveis = mostrarTodosProduto ? filtradas : filtradas.slice(0, LIMITE_PAINEL);
+  tbody.innerHTML = visiveis
+    .map(
+      (l) => `
     <tr>
-      <td>${escapeHtml(nomePor(produtosCache, produtoId))}</td>
-      <td>${migradas}</td>
-      <td>${aindaSpot}</td>
-      <td>${progressoHtml(pct)}</td>
-    </tr>`;
-    })
+      <td>${escapeHtml(l.nome)}</td>
+      <td>${l.migradas}</td>
+      <td>${l.aindaSpot}</td>
+      <td>${progressoHtml(l.pct)}</td>
+    </tr>`
+    )
     .join("");
+
+  if (filtradas.length > LIMITE_PAINEL) {
+    btnMostrarTodos.classList.remove("hidden");
+    btnMostrarTodos.textContent = mostrarTodosProduto ? "Mostrar menos" : `Mostrar todos (${filtradas.length})`;
+  } else {
+    btnMostrarTodos.classList.add("hidden");
+  }
 }
+
+document.getElementById("filtro-produto-painel").addEventListener("input", renderLinhasProdutoVisiveis);
+document.getElementById("btn-mostrar-todos-produto").addEventListener("click", () => {
+  mostrarTodosProduto = !mostrarTodosProduto;
+  renderLinhasProdutoVisiveis();
+});
 
 document.getElementById("btn-refresh-painel").addEventListener("click", loadPainel);
 

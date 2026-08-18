@@ -42,6 +42,9 @@
 
     <h2 class="mt">Avanço por fornecedor</h2>
     <p class="muted">Ordenado para priorizar quem ainda está preso em cotação spot há mais tempo.</p>
+    <div class="filters">
+      <input type="text" id="filtro-fornecedor-painel" placeholder="Buscar fornecedor...">
+    </div>
     <div class="table-wrap">
       <table id="tbl-fornecedor">
         <thead>
@@ -50,8 +53,12 @@
         <tbody></tbody>
       </table>
     </div>
+    <button id="btn-mostrar-todos-fornecedor" type="button" class="btn secondary small mt hidden">Mostrar todos</button>
 
     <h2 class="mt">Avanço por produto</h2>
+    <div class="filters">
+      <input type="text" id="filtro-produto-painel" placeholder="Buscar produto...">
+    </div>
     <div class="table-wrap">
       <table id="tbl-produto">
         <thead>
@@ -60,6 +67,7 @@
         <tbody></tbody>
       </table>
     </div>
+    <button id="btn-mostrar-todos-produto" type="button" class="btn secondary small mt hidden">Mostrar todos</button>
   </section>
 
   <!-- NOVA COMPRA -->
