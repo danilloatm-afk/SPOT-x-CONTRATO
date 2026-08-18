@@ -933,8 +933,16 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
 });
 
 // ---------- inicialização ----------
-(async function init() {
+// Disparar a 1a consulta só depois que a página estiver totalmente carregada
+// evita um travamento observado no cliente do Supabase quando a consulta sai
+// ainda durante o parse do script (antes do "load").
+async function init() {
   await recarregarApoio();
   await loadMeta();
   await loadPainel();
-})();
+}
+if (document.readyState === "complete") {
+  init();
+} else {
+  window.addEventListener("load", init);
+}
