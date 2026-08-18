@@ -933,16 +933,13 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
 });
 
 // ---------- inicialização ----------
-// Disparar a 1a consulta só depois que a página estiver totalmente carregada
-// evita um travamento observado no cliente do Supabase quando a consulta sai
-// ainda durante o parse do script (antes do "load").
 async function init() {
   await recarregarApoio();
   await loadMeta();
   await loadPainel();
 }
-if (document.readyState === "complete") {
-  init();
-} else {
-  window.addEventListener("load", init);
-}
+// Pequena pausa antes da 1a consulta — evita um travamento observado no
+// cliente do Supabase quando a consulta é disparada cedo demais no ciclo de
+// carregamento da página (o "load" já pode ter ocorrido antes deste script
+// nem rodar, então um setTimeout garante o atraso de verdade).
+setTimeout(init, 300);
