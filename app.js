@@ -215,14 +215,17 @@ async function loadLista() {
 
 function renderLista() {
   const tbody = document.querySelector("#tbl-lista tbody");
+  document.getElementById("lista-marcar-todas").checked = false;
   if (!comprasCache.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">Nenhuma compra encontrada.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">Nenhuma compra encontrada.</td></tr>';
+    atualizarSelecaoLista();
     return;
   }
   tbody.innerHTML = comprasCache
     .map(
       (c) => `
     <tr>
+      <td><input type="checkbox" class="lista-marcar" data-id="${c.id}"></td>
       <td>${formatarData(c.data)}</td>
       <td>${escapeHtml(nomePor(fornecedoresCache, c.fornecedor_id))}</td>
       <td>${escapeHtml(nomePor(produtosCache, c.produto_id))}</td>
@@ -233,15 +236,47 @@ function renderLista() {
     </tr>`
     )
     .join("");
+  atualizarSelecaoLista();
 }
 
 document.getElementById("btn-filtrar-lista").addEventListener("click", loadLista);
 
 document.querySelector("#tbl-lista tbody").addEventListener("click", async (e) => {
+  const marcar = e.target.closest(".lista-marcar");
+  if (marcar) {
+    atualizarSelecaoLista();
+    return;
+  }
   const btn = e.target.closest("button[data-excluir]");
   if (!btn) return;
   if (!confirm("Excluir esta compra?")) return;
   await db.from("cs_compras").delete().eq("id", btn.dataset.excluir);
+  await loadLista();
+});
+
+function atualizarSelecaoLista() {
+  const marcadas = document.querySelectorAll(".lista-marcar:checked");
+  const btnExcluir = document.getElementById("btn-excluir-selecionadas");
+  const info = document.getElementById("lista-selecionadas-info");
+  if (marcadas.length > 0) {
+    btnExcluir.classList.remove("hidden");
+    info.textContent = `${marcadas.length} selecionada(s)`;
+  } else {
+    btnExcluir.classList.add("hidden");
+    info.textContent = "";
+  }
+}
+
+document.getElementById("lista-marcar-todas").addEventListener("change", (e) => {
+  document.querySelectorAll(".lista-marcar").forEach((cb) => (cb.checked = e.target.checked));
+  atualizarSelecaoLista();
+});
+
+document.getElementById("btn-excluir-selecionadas").addEventListener("click", async () => {
+  const ids = Array.from(document.querySelectorAll(".lista-marcar:checked")).map((cb) => cb.dataset.id);
+  if (!ids.length) return;
+  if (!confirm(`Excluir ${ids.length} compra(s) selecionada(s)? Essa ação não pode ser desfeita.`)) return;
+  await db.from("cs_compras").delete().in("id", ids);
   await loadLista();
 });
 

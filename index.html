@@ -163,10 +163,15 @@
       <select id="fil-produto"><option value="">Todos os produtos</option></select>
       <button id="btn-filtrar-lista" class="btn secondary">Filtrar</button>
     </div>
+    <div class="section-head">
+      <span id="lista-selecionadas-info" class="muted"></span>
+      <button id="btn-excluir-selecionadas" type="button" class="btn secondary danger hidden">Excluir selecionadas</button>
+    </div>
     <div class="table-wrap">
       <table id="tbl-lista">
         <thead>
           <tr>
+            <th><input type="checkbox" id="lista-marcar-todas"></th>
             <th>Data</th>
             <th>Fornecedor</th>
             <th>Produto</th>
