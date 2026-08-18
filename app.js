@@ -491,11 +491,8 @@ function diasDesde(dataIso) {
   return Math.max(0, Math.round((Date.now() - new Date(dataIso + "T00:00:00")) / 86400000));
 }
 
-const LIMITE_PAINEL = 10;
 let linhasFornecedorFull = [];
-let mostrarTodosFornecedor = false;
 let linhasProdutoFull = [];
-let mostrarTodosProduto = false;
 
 function renderTabelaFornecedor(relacoes) {
   const porFornecedor = {};
@@ -529,18 +526,15 @@ function renderTabelaFornecedor(relacoes) {
 
 function renderLinhasFornecedorVisiveis() {
   const tbody = document.querySelector("#tbl-fornecedor tbody");
-  const btnMostrarTodos = document.getElementById("btn-mostrar-todos-fornecedor");
   const filtro = document.getElementById("filtro-fornecedor-painel").value.trim().toLowerCase();
   const filtradas = filtro ? linhasFornecedorFull.filter((l) => l.nome.toLowerCase().includes(filtro)) : linhasFornecedorFull;
 
   if (!filtradas.length) {
     tbody.innerHTML = `<tr><td colspan="5" class="empty-state">${linhasFornecedorFull.length ? "Nenhum fornecedor encontrado." : "Sem dados ainda."}</td></tr>`;
-    btnMostrarTodos.classList.add("hidden");
     return;
   }
 
-  const visiveis = mostrarTodosFornecedor ? filtradas : filtradas.slice(0, LIMITE_PAINEL);
-  tbody.innerHTML = visiveis
+  tbody.innerHTML = filtradas
     .map(
       (l) => `
     <tr>
@@ -552,20 +546,9 @@ function renderLinhasFornecedorVisiveis() {
     </tr>`
     )
     .join("");
-
-  if (filtradas.length > LIMITE_PAINEL) {
-    btnMostrarTodos.classList.remove("hidden");
-    btnMostrarTodos.textContent = mostrarTodosFornecedor ? "Mostrar menos" : `Mostrar todos (${filtradas.length})`;
-  } else {
-    btnMostrarTodos.classList.add("hidden");
-  }
 }
 
 document.getElementById("filtro-fornecedor-painel").addEventListener("input", renderLinhasFornecedorVisiveis);
-document.getElementById("btn-mostrar-todos-fornecedor").addEventListener("click", () => {
-  mostrarTodosFornecedor = !mostrarTodosFornecedor;
-  renderLinhasFornecedorVisiveis();
-});
 
 function renderTabelaProduto(relacoes) {
   const porProduto = {};
@@ -590,18 +573,15 @@ function renderTabelaProduto(relacoes) {
 
 function renderLinhasProdutoVisiveis() {
   const tbody = document.querySelector("#tbl-produto tbody");
-  const btnMostrarTodos = document.getElementById("btn-mostrar-todos-produto");
   const filtro = document.getElementById("filtro-produto-painel").value.trim().toLowerCase();
   const filtradas = filtro ? linhasProdutoFull.filter((l) => l.nome.toLowerCase().includes(filtro)) : linhasProdutoFull;
 
   if (!filtradas.length) {
     tbody.innerHTML = `<tr><td colspan="4" class="empty-state">${linhasProdutoFull.length ? "Nenhum produto encontrado." : "Sem dados ainda."}</td></tr>`;
-    btnMostrarTodos.classList.add("hidden");
     return;
   }
 
-  const visiveis = mostrarTodosProduto ? filtradas : filtradas.slice(0, LIMITE_PAINEL);
-  tbody.innerHTML = visiveis
+  tbody.innerHTML = filtradas
     .map(
       (l) => `
     <tr>
@@ -612,20 +592,9 @@ function renderLinhasProdutoVisiveis() {
     </tr>`
     )
     .join("");
-
-  if (filtradas.length > LIMITE_PAINEL) {
-    btnMostrarTodos.classList.remove("hidden");
-    btnMostrarTodos.textContent = mostrarTodosProduto ? "Mostrar menos" : `Mostrar todos (${filtradas.length})`;
-  } else {
-    btnMostrarTodos.classList.add("hidden");
-  }
 }
 
 document.getElementById("filtro-produto-painel").addEventListener("input", renderLinhasProdutoVisiveis);
-document.getElementById("btn-mostrar-todos-produto").addEventListener("click", () => {
-  mostrarTodosProduto = !mostrarTodosProduto;
-  renderLinhasProdutoVisiveis();
-});
 
 document.getElementById("btn-refresh-painel").addEventListener("click", loadPainel);
 

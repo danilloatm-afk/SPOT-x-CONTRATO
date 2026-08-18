@@ -187,6 +187,9 @@ input, select, textarea {
 
 .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
 
+.table-wrap-scroll { max-height: 420px; overflow-y: auto; }
+.table-wrap-scroll thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+
 table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 
 th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
@@ -210,8 +213,12 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; }
 .inline-form input { flex: 1; min-width: 120px; }
 
 .cadastro-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; max-height: 320px; overflow-y: auto; }
-.cadastro-lista li { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0.5rem; border-radius: 6px; background: var(--bg); font-size: 0.88rem; }
+.cadastro-lista li { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.4rem 0.5rem; border-radius: 6px; background: var(--bg); font-size: 0.88rem; }
 .cadastro-lista li.inativo { opacity: 0.5; }
+.cadastro-linha { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+
+.cadastro-mesclar-form { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding-top: 0.4rem; border-top: 1px dashed var(--border); }
+.cadastro-mesclar-form select { flex: 1; min-width: 140px; }
 
 .hidden { display: none !important; }
 
