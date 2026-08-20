@@ -190,6 +190,22 @@ input, select, textarea {
 .table-wrap-scroll { max-height: 420px; overflow-y: auto; }
 .table-wrap-scroll thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
 
+.paginacao { display: flex; align-items: center; justify-content: center; gap: 0.3rem; flex-wrap: wrap; margin-top: 1rem; }
+.paginacao button {
+  min-width: 2.1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.paginacao button:hover:not(:disabled) { background: var(--primary-soft); }
+.paginacao button.ativo { background: var(--primary); border-color: var(--primary); color: white; font-weight: 600; }
+.paginacao button:disabled { opacity: 0.4; cursor: default; }
+.paginacao .paginacao-reticencias { color: var(--text-muted); padding: 0 0.2rem; }
+
 table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 
 th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
