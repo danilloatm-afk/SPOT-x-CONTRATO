@@ -242,6 +242,9 @@ document.getElementById("form-compra").addEventListener("submit", async (e) => {
 });
 
 // ---------- lista / filtros ----------
+const LISTA_POR_PAGINA = 25;
+let paginaAtualLista = 1;
+
 async function loadLista() {
   let query = db.from("cs_compras").select("*").order("data", { ascending: false });
   const modalidade = document.getElementById("fil-modalidade").value;
@@ -252,6 +255,7 @@ async function loadLista() {
   if (produto) query = query.eq("produto_id", produto);
   const { data, error } = await comTimeout(query);
   comprasCache = error ? [] : data;
+  paginaAtualLista = 1;
   renderLista();
 }
 
@@ -260,10 +264,16 @@ function renderLista() {
   document.getElementById("lista-marcar-todas").checked = false;
   if (!comprasCache.length) {
     tbody.innerHTML = '<tr><td colspan="10" class="empty-state">Nenhuma compra encontrada.</td></tr>';
+    document.getElementById("lista-paginacao").innerHTML = "";
     atualizarSelecaoLista();
     return;
   }
-  tbody.innerHTML = comprasCache
+  const totalPaginas = Math.max(1, Math.ceil(comprasCache.length / LISTA_POR_PAGINA));
+  if (paginaAtualLista > totalPaginas) paginaAtualLista = totalPaginas;
+  const inicio = (paginaAtualLista - 1) * LISTA_POR_PAGINA;
+  const doPagina = comprasCache.slice(inicio, inicio + LISTA_POR_PAGINA);
+
+  tbody.innerHTML = doPagina
     .map(
       (c) => `
     <tr>
@@ -280,8 +290,46 @@ function renderLista() {
     </tr>`
     )
     .join("");
+  renderPaginacaoLista(totalPaginas);
   atualizarSelecaoLista();
 }
+
+// Mostra no máximo 7 botões numerados por vez (com reticências), pra não
+// virar uma fileira gigante quando tiver muitas páginas.
+function paginasParaMostrar(atual, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const paginas = new Set([1, total, atual, atual - 1, atual + 1]);
+  if (atual <= 3) [2, 3, 4].forEach((p) => paginas.add(p));
+  if (atual >= total - 2) [total - 3, total - 2, total - 1].forEach((p) => paginas.add(p));
+  return Array.from(paginas)
+    .filter((p) => p >= 1 && p <= total)
+    .sort((a, b) => a - b);
+}
+
+function renderPaginacaoLista(totalPaginas) {
+  const wrap = document.getElementById("lista-paginacao");
+  if (totalPaginas <= 1) {
+    wrap.innerHTML = "";
+    return;
+  }
+  const paginas = paginasParaMostrar(paginaAtualLista, totalPaginas);
+  let html = `<button data-pagina="${paginaAtualLista - 1}" ${paginaAtualLista === 1 ? "disabled" : ""}>‹</button>`;
+  let anterior = 0;
+  paginas.forEach((p) => {
+    if (p - anterior > 1) html += `<span class="paginacao-reticencias">…</span>`;
+    html += `<button data-pagina="${p}" class="${p === paginaAtualLista ? "ativo" : ""}">${p}</button>`;
+    anterior = p;
+  });
+  html += `<button data-pagina="${paginaAtualLista + 1}" ${paginaAtualLista === totalPaginas ? "disabled" : ""}>›</button>`;
+  wrap.innerHTML = html;
+}
+
+document.getElementById("lista-paginacao").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-pagina]");
+  if (!btn || btn.disabled) return;
+  paginaAtualLista = Number(btn.dataset.pagina);
+  renderLista();
+});
 
 document.getElementById("btn-filtrar-lista").addEventListener("click", loadLista);
 
