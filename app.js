@@ -331,6 +331,42 @@ document.getElementById("lista-paginacao").addEventListener("click", (e) => {
   renderLista();
 });
 
+function celulaCsv(valor) {
+  const texto = String(valor ?? "");
+  return `"${texto.replace(/"/g, '""')}"`;
+}
+
+// Exporta todas as compras filtradas (não só a página atual) em CSV com
+// separador ";" — é o que o Excel em português abre direto, sem passar por
+// importação manual.
+document.getElementById("btn-exportar-excel").addEventListener("click", () => {
+  if (!comprasCache.length) {
+    alert("Não há compras para exportar.");
+    return;
+  }
+  const cabecalho = ["Data", "Nº Pedido", "Fornecedor", "Produto", "Código", "Modalidade", "Volume", "Valor"];
+  const linhas = comprasCache.map((c) => [
+    formatarData(c.data),
+    c.numero_pedido || "",
+    nomePor(fornecedoresCache, c.fornecedor_id),
+    nomePor(produtosCache, c.produto_id),
+    codigoPor(produtosCache, c.produto_id),
+    MODALIDADE_LABEL[c.modalidade] || c.modalidade,
+    c.volume != null ? formatarNumero(c.volume, 0) : "",
+    c.valor != null ? formatarNumero(c.valor) : "",
+  ]);
+  const csv = [cabecalho, ...linhas].map((linha) => linha.map(celulaCsv).join(";")).join("\r\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `compras_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
 document.getElementById("btn-filtrar-lista").addEventListener("click", loadLista);
 
 document.querySelector("#tbl-lista tbody").addEventListener("click", async (e) => {
