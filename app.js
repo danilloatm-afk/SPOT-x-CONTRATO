@@ -90,7 +90,6 @@ async function loadProdutos() {
   const { data, error } = await comTimeout(db.from("cs_produtos").select("*").order("ativo", { ascending: false }).order("nome"));
   produtosCache = error ? produtosCache : data;
   preencherSelect("cp-produto", produtosCache, "Selecione um produto");
-  preencherSelect("fil-produto", produtosCache, "Todos os produtos", true);
   renderCadastroLista("lista-produtos", produtosCache, "cs_produtos");
 }
 
@@ -250,11 +249,9 @@ async function loadLista() {
   const numeroPedido = document.getElementById("fil-numero-pedido").value.trim();
   const modalidade = document.getElementById("fil-modalidade").value;
   const fornecedor = document.getElementById("fil-fornecedor").value;
-  const produto = document.getElementById("fil-produto").value;
   if (numeroPedido) query = query.ilike("numero_pedido", `%${numeroPedido}%`);
   if (modalidade) query = query.eq("modalidade", modalidade);
   if (fornecedor) query = query.eq("fornecedor_id", fornecedor);
-  if (produto) query = query.eq("produto_id", produto);
   const { data, error } = await comTimeout(query);
   comprasCache = error ? [] : data;
   paginaAtualLista = 1;
@@ -265,6 +262,21 @@ document.getElementById("fil-numero-pedido").addEventListener("keydown", (e) => 
   if (e.key === "Enter") loadLista();
 });
 
+document.getElementById("fil-produto-texto").addEventListener("input", () => {
+  paginaAtualLista = 1;
+  renderLista();
+});
+
+function comprasVisiveisLista() {
+  const filtro = document.getElementById("fil-produto-texto").value.trim().toLowerCase();
+  if (!filtro) return comprasCache;
+  return comprasCache.filter((c) => {
+    const nome = nomePor(produtosCache, c.produto_id).toLowerCase();
+    const codigo = codigoPor(produtosCache, c.produto_id).toLowerCase();
+    return nome.includes(filtro) || codigo.includes(filtro);
+  });
+}
+
 function renderLista() {
   const tbody = document.querySelector("#tbl-lista tbody");
   document.getElementById("lista-marcar-todas").checked = false;
@@ -274,10 +286,17 @@ function renderLista() {
     atualizarSelecaoLista();
     return;
   }
-  const totalPaginas = Math.max(1, Math.ceil(comprasCache.length / LISTA_POR_PAGINA));
+  const visiveis = comprasVisiveisLista();
+  if (!visiveis.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">Nenhum produto encontrado.</td></tr>';
+    document.getElementById("lista-paginacao").innerHTML = "";
+    atualizarSelecaoLista();
+    return;
+  }
+  const totalPaginas = Math.max(1, Math.ceil(visiveis.length / LISTA_POR_PAGINA));
   if (paginaAtualLista > totalPaginas) paginaAtualLista = totalPaginas;
   const inicio = (paginaAtualLista - 1) * LISTA_POR_PAGINA;
-  const doPagina = comprasCache.slice(inicio, inicio + LISTA_POR_PAGINA);
+  const doPagina = visiveis.slice(inicio, inicio + LISTA_POR_PAGINA);
 
   tbody.innerHTML = doPagina
     .map(
@@ -346,12 +365,13 @@ function celulaCsv(valor) {
 // separador ";" — é o que o Excel em português abre direto, sem passar por
 // importação manual.
 document.getElementById("btn-exportar-excel").addEventListener("click", () => {
-  if (!comprasCache.length) {
+  const visiveis = comprasVisiveisLista();
+  if (!visiveis.length) {
     alert("Não há compras para exportar.");
     return;
   }
   const cabecalho = ["Data", "Nº Pedido", "Fornecedor", "Produto", "Código", "Modalidade", "Volume", "Valor"];
-  const linhas = comprasCache.map((c) => [
+  const linhas = visiveis.map((c) => [
     formatarData(c.data),
     c.numero_pedido || "",
     nomePor(fornecedoresCache, c.fornecedor_id),
