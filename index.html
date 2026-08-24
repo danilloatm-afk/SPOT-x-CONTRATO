@@ -40,7 +40,7 @@
     <h2 class="mt">🎯 Sugestões de migração para contrato</h2>
     <p class="muted">Itens ainda em spot com mais compras repetidas — fortes candidatos a virar contrato.</p>
     <div class="filters">
-      <input type="text" id="filtro-sugestao-painel" placeholder="Buscar fornecedor ou produto...">
+      <input type="text" id="filtro-sugestao-painel" class="busca" placeholder="Buscar fornecedor ou produto...">
     </div>
     <div class="table-wrap table-wrap-scroll">
       <table id="tbl-sugestao">
@@ -62,7 +62,7 @@
     <h2 class="mt">Avanço por fornecedor</h2>
     <p class="muted">Ordenado para priorizar quem ainda está preso em cotação spot há mais tempo.</p>
     <div class="filters">
-      <input type="text" id="filtro-fornecedor-painel" placeholder="Buscar fornecedor...">
+      <input type="text" id="filtro-fornecedor-painel" class="busca" placeholder="Buscar fornecedor...">
     </div>
     <div class="table-wrap table-wrap-scroll">
       <table id="tbl-fornecedor">
@@ -75,7 +75,7 @@
 
     <h2 class="mt">Avanço por produto</h2>
     <div class="filters">
-      <input type="text" id="filtro-produto-painel" placeholder="Buscar produto...">
+      <input type="text" id="filtro-produto-painel" class="busca" placeholder="Buscar produto...">
     </div>
     <div class="table-wrap table-wrap-scroll">
       <table id="tbl-produto">
@@ -184,14 +184,14 @@
   <section id="tab-lista" class="tab-content">
     <h2>Todas as compras</h2>
     <div class="filters">
-      <input type="text" id="fil-numero-pedido" placeholder="Nº do pedido...">
+      <input type="text" id="fil-numero-pedido" class="busca" placeholder="Nº do pedido...">
       <select id="fil-modalidade">
         <option value="">Todas as modalidades</option>
         <option value="spot">Spot</option>
         <option value="contrato">Contrato</option>
       </select>
       <select id="fil-fornecedor"><option value="">Todos os fornecedores</option></select>
-      <select id="fil-produto"><option value="">Todos os produtos</option></select>
+      <input type="text" id="fil-produto-texto" class="busca" placeholder="Buscar produto (nome ou código)...">
       <button id="btn-filtrar-lista" class="btn secondary">Filtrar</button>
     </div>
     <div class="section-head">
