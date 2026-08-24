@@ -247,9 +247,11 @@ let paginaAtualLista = 1;
 
 async function loadLista() {
   let query = db.from("cs_compras").select("*").order("data", { ascending: false });
+  const numeroPedido = document.getElementById("fil-numero-pedido").value.trim();
   const modalidade = document.getElementById("fil-modalidade").value;
   const fornecedor = document.getElementById("fil-fornecedor").value;
   const produto = document.getElementById("fil-produto").value;
+  if (numeroPedido) query = query.ilike("numero_pedido", `%${numeroPedido}%`);
   if (modalidade) query = query.eq("modalidade", modalidade);
   if (fornecedor) query = query.eq("fornecedor_id", fornecedor);
   if (produto) query = query.eq("produto_id", produto);
@@ -258,6 +260,10 @@ async function loadLista() {
   paginaAtualLista = 1;
   renderLista();
 }
+
+document.getElementById("fil-numero-pedido").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") loadLista();
+});
 
 function renderLista() {
   const tbody = document.querySelector("#tbl-lista tbody");
