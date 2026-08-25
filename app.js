@@ -70,6 +70,12 @@ function diasPorCodigoPagamento(codigo) {
   return item && item.dias != null ? Number(item.dias) : null;
 }
 
+function condicaoPagamentoLabel(codigo) {
+  if (!codigo) return "—";
+  const dias = diasPorCodigoPagamento(codigo);
+  return dias != null ? `${formatarNumero(dias, dias % 1 === 0 ? 0 : 1)} dias (${codigo})` : `${codigo} (sem prazo)`;
+}
+
 async function loadCondicoesPagamento() {
   const { data, error } = await comTimeout(db.from("cs_condicoes_pagamento").select("*"));
   condicoesPagamentoCache = error ? condicoesPagamentoCache : data;
@@ -293,14 +299,14 @@ function renderLista() {
   const tbody = document.querySelector("#tbl-lista tbody");
   document.getElementById("lista-marcar-todas").checked = false;
   if (!comprasCache.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">Nenhuma compra encontrada.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty-state">Nenhuma compra encontrada.</td></tr>';
     document.getElementById("lista-paginacao").innerHTML = "";
     atualizarSelecaoLista();
     return;
   }
   const visiveis = comprasVisiveisLista();
   if (!visiveis.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-state">Nenhum produto encontrado.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty-state">Nenhum produto encontrado.</td></tr>';
     document.getElementById("lista-paginacao").innerHTML = "";
     atualizarSelecaoLista();
     return;
@@ -323,6 +329,7 @@ function renderLista() {
       <td><span class="badge modalidade-${c.modalidade}">${MODALIDADE_LABEL[c.modalidade]}</span></td>
       <td>${c.volume != null ? formatarNumero(c.volume, 0) : "—"}</td>
       <td>${c.valor != null ? "R$ " + formatarNumero(c.valor) : "—"}</td>
+      <td>${escapeHtml(condicaoPagamentoLabel(c.condicao_pagamento_codigo))}</td>
       <td class="acoes"><button class="link-btn danger" data-excluir="${c.id}">Excluir</button></td>
     </tr>`
     )
@@ -382,7 +389,7 @@ document.getElementById("btn-exportar-excel").addEventListener("click", () => {
     alert("Não há compras para exportar.");
     return;
   }
-  const cabecalho = ["Data", "Nº Pedido", "Fornecedor", "Produto", "Código", "Modalidade", "Volume", "Valor"];
+  const cabecalho = ["Data", "Nº Pedido", "Fornecedor", "Produto", "Código", "Modalidade", "Volume", "Valor", "Condição Pagto"];
   const linhas = visiveis.map((c) => [
     formatarData(c.data),
     c.numero_pedido || "",
@@ -392,6 +399,7 @@ document.getElementById("btn-exportar-excel").addEventListener("click", () => {
     MODALIDADE_LABEL[c.modalidade] || c.modalidade,
     c.volume != null ? formatarNumero(c.volume, 0) : "",
     c.valor != null ? formatarNumero(c.valor) : "",
+    condicaoPagamentoLabel(c.condicao_pagamento_codigo),
   ]);
   const csv = [cabecalho, ...linhas].map((linha) => linha.map(celulaCsv).join(";")).join("\r\n");
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
