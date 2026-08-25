@@ -607,9 +607,11 @@ async function loadPainel() {
 
 function renderResumoCards(relacoes) {
   const { total, migradas, aindaSpot, pct } = calcularAvanco(relacoes);
+  const produtosDistintos = new Set(relacoes.map((r) => String(r.produto_id))).size;
 
   const cards = [
     { label: "Relações fornecedor + produto", valor: total, cls: "" },
+    { label: "Produtos distintos", valor: produtosDistintos, cls: "" },
     { label: "Já migradas para contrato", valor: migradas, cls: "ok" },
     { label: "Ainda em cotação spot", valor: aindaSpot, cls: aindaSpot > 0 ? "atrasado" : "" },
     { label: "Avanço geral da migração", valor: `${Math.round(pct * 10) / 10}%`, cls: pct >= 70 ? "ok" : "" },
