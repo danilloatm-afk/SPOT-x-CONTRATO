@@ -566,6 +566,61 @@ function renderGraficoEvolucao(pontos, containerId = "grafico-evolucao", mostrar
   </div>`;
 }
 
+// Prazo médio de pagamento por mês (não é acumulado — cada ponto é só dos
+// pedidos feitos NAQUELE mês específico, pra mostrar a tendência recente).
+function evolucaoMensalPrazoPagamento(compras, meses = 6) {
+  const hoje = new Date();
+  const pontos = [];
+  for (let i = meses - 1; i >= 0; i--) {
+    const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+    const fimMes = new Date(hoje.getFullYear(), hoje.getMonth() - i + 1, 0);
+    const inicioIso = inicioMes.toISOString().slice(0, 10);
+    const fimIso = fimMes.toISOString().slice(0, 10);
+    const comprasDoMes = compras.filter((c) => c.data >= inicioIso && c.data <= fimIso);
+    const resultado = calcularPrazoMedioPagamento(comprasDoMes);
+    pontos.push({
+      label: fimMes.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }),
+      valor: resultado ? resultado.media : null,
+    });
+  }
+  return pontos;
+}
+
+// Gráfico de barras com escala dinâmica (não é percentual 0-100 como o de
+// avanço — aqui o valor é "dias", então a barra mais alta vira a referência
+// de 100% de altura).
+function renderGraficoEvolucaoDias(pontos, containerId, sufixo = "dias") {
+  const wrap = document.getElementById(containerId);
+  const valores = pontos.map((p) => p.valor).filter((v) => v != null);
+  if (!valores.length) {
+    wrap.innerHTML = '<div class="empty-state">Sem dados suficientes ainda para calcular a evolução.</div>';
+    return;
+  }
+  const maxValor = Math.max(...valores);
+  const tracks = pontos
+    .map((p) => {
+      const altura = p.valor == null ? 0 : Math.max(2, (p.valor / maxValor) * 100);
+      return `
+      <div class="chart-track-col">
+        <div class="chart-col-bar-track"><div class="chart-col-bar" style="height:${altura}%"></div></div>
+      </div>`;
+    })
+    .join("");
+  const labels = pontos
+    .map(
+      (p) => `
+      <div class="chart-label-col">
+        <div class="chart-col-value">${p.valor == null ? "—" : Math.round(p.valor) + " " + sufixo}</div>
+        <div class="chart-col-label">${escapeHtml(p.label)}</div>
+      </div>`
+    )
+    .join("");
+  wrap.innerHTML = `<div class="chart-bars">
+    <div class="chart-tracks-wrap">${tracks}</div>
+    <div class="chart-labels-row">${labels}</div>
+  </div>`;
+}
+
 function progressoHtml(pct) {
   const arredondado = Math.round(pct * 10) / 10;
   const completo = pct >= 100 ? "completo" : "";
@@ -621,6 +676,7 @@ async function loadPainel() {
   renderTabelaSugestoes(relacoes);
   renderGraficoEvolucao(evolucaoMensal(todasComprasCache), "grafico-evolucao");
   renderGraficoEvolucao(evolucaoMensalFornecedores(todasComprasCache), "grafico-evolucao-fornecedor", false);
+  renderGraficoEvolucaoDias(evolucaoMensalPrazoPagamento(todasComprasCache), "grafico-evolucao-prazo");
   renderTabelaFornecedor(relacoes);
   renderTabelaProduto(relacoes);
 }
