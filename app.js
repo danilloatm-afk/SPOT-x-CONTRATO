@@ -654,7 +654,11 @@ function calcularSugestoesMigracao(relacoes) {
       const comprasSpot = todasComprasCache.filter(
         (c) => String(c.fornecedor_id) === String(r.fornecedor_id) && String(c.produto_id) === String(r.produto_id) && c.modalidade === "spot"
       );
-      const numeroComprasSpot = comprasSpot.length;
+      // Conta pedidos distintos, não linhas de compra — um mesmo pedido pode
+      // ter o mesmo item em mais de uma linha (lotes/entregas separadas) e
+      // isso não deve contar como recorrência de verdade.
+      const pedidosSpot = new Set(comprasSpot.map((c) => c.numero_pedido || `sem-pedido-${c.id}`));
+      const numeroComprasSpot = pedidosSpot.size;
       const volumeTotalSpot = comprasSpot.reduce((soma, c) => soma + Number(c.volume || 0), 0);
       const primeiraCompraSpot = comprasSpot.reduce((min, c) => (c.data < min ? c.data : min), comprasSpot[0]?.data);
       const temValor = comprasSpot.some((c) => c.valor != null);
@@ -687,7 +691,7 @@ function renderLinhasSugestaoVisiveis() {
 
   if (!filtradas.length) {
     tbody.innerHTML = `<tr><td colspan="6" class="empty-state">${
-      linhasSugestaoFull.length ? "Nenhum item encontrado." : `Nenhum item com ${MIN_COMPRAS_SUGESTAO}+ compras repetidas em spot ainda.`
+      linhasSugestaoFull.length ? "Nenhum item encontrado." : `Nenhum item com ${MIN_COMPRAS_SUGESTAO}+ pedidos repetidos em spot ainda.`
     }</td></tr>`;
     return;
   }
