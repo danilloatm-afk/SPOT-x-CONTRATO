@@ -62,6 +62,18 @@ let produtosCache = [];
 let fornecedoresCache = [];
 let comprasCache = []; // resultado filtrado da aba Compras
 let todasComprasCache = []; // todas as compras, usado pelo painel
+let condicoesPagamentoCache = []; // de-para código -> dias de prazo
+
+function diasPorCodigoPagamento(codigo) {
+  if (!codigo) return null;
+  const item = condicoesPagamentoCache.find((c) => c.codigo === String(codigo).trim());
+  return item && item.dias != null ? Number(item.dias) : null;
+}
+
+async function loadCondicoesPagamento() {
+  const { data, error } = await comTimeout(db.from("cs_condicoes_pagamento").select("*"));
+  condicoesPagamentoCache = error ? condicoesPagamentoCache : data;
+}
 
 function nomePor(cache, id) {
   const item = cache.find((x) => String(x.id) === String(id));
@@ -605,6 +617,26 @@ async function loadPainel() {
   renderTabelaProduto(relacoes);
 }
 
+// Prazo médio de pagamento: agrupa por pedido (não por linha — várias linhas
+// do mesmo pedido têm a mesma condição) e faz a média dos que têm um código
+// com prazo conhecido na tabela cs_condicoes_pagamento.
+function calcularPrazoMedioPagamento(compras) {
+  const porPedido = new Map();
+  compras.forEach((c) => {
+    const chave = c.numero_pedido || `sem-pedido-${c.id}`;
+    if (!porPedido.has(chave)) porPedido.set(chave, c.condicao_pagamento_codigo);
+  });
+  const dias = Array.from(porPedido.values())
+    .map((codigo) => diasPorCodigoPagamento(codigo))
+    .filter((d) => d != null);
+  if (!dias.length) return null;
+  return {
+    media: dias.reduce((soma, d) => soma + d, 0) / dias.length,
+    cobertura: dias.length,
+    totalPedidos: porPedido.size,
+  };
+}
+
 function renderResumoCards(relacoes) {
   const { total, migradas, aindaSpot, pct } = calcularAvanco(relacoes);
   const produtosDistintos = new Set(relacoes.map((r) => String(r.produto_id))).size;
@@ -616,6 +648,15 @@ function renderResumoCards(relacoes) {
     { label: "Ainda em cotação spot", valor: aindaSpot, cls: aindaSpot > 0 ? "atrasado" : "" },
     { label: "Avanço geral da migração", valor: `${Math.round(pct * 10) / 10}%`, cls: pct >= 70 ? "ok" : "" },
   ];
+
+  const prazoPagamento = calcularPrazoMedioPagamento(todasComprasCache);
+  if (prazoPagamento) {
+    cards.push({
+      label: `Prazo médio de pagamento (${prazoPagamento.cobertura}/${prazoPagamento.totalPedidos} pedidos)`,
+      valor: `${Math.round(prazoPagamento.media)} dias`,
+      cls: "",
+    });
+  }
 
   if (metaCache && metaCache.percentual != null) {
     const faltam = Math.max(0, Math.round((metaCache.percentual - pct) * 10) / 10);
@@ -849,6 +890,16 @@ document.getElementById("pdf-numero-pedido").addEventListener("change", (e) => {
   checarPedidoDuplicado(e.target.value.trim());
 });
 
+document.getElementById("pdf-condicao-pagamento").addEventListener("input", (e) => {
+  const codigo = e.target.value.trim();
+  const dias = diasPorCodigoPagamento(codigo);
+  document.getElementById("pdf-condicao-pagamento-info").textContent = codigo
+    ? dias != null
+      ? `Prazo: ${dias} dias (código ${codigo})`
+      : `Código ${codigo} não encontrado na tabela de condições.`
+    : "";
+});
+
 function arquivoParaBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -934,6 +985,14 @@ document.getElementById("btn-ler-pdf").addEventListener("click", async () => {
       : "";
     document.getElementById("pdf-data").value = new Date().toISOString().slice(0, 10);
     document.getElementById("pdf-numero-pedido").value = pdfExtraido.numero_pedido || "";
+    const codigoPagamento = pdfExtraido.condicao_pagamento_codigo || "";
+    document.getElementById("pdf-condicao-pagamento").value = codigoPagamento;
+    const diasPagamento = diasPorCodigoPagamento(codigoPagamento);
+    document.getElementById("pdf-condicao-pagamento-info").textContent = codigoPagamento
+      ? diasPagamento != null
+        ? `Prazo: ${diasPagamento} dias (código ${codigoPagamento})`
+        : `Código ${codigoPagamento} lido, mas sem prazo cadastrado na tabela de condições.`
+      : "";
     await checarPedidoDuplicado(pdfExtraido.numero_pedido);
     renderTabelaPdfItens();
     document.getElementById("pdf-revisao").classList.remove("hidden");
@@ -998,6 +1057,7 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
     const modalidade = document.getElementById("pdf-modalidade").value;
     const data_compra = document.getElementById("pdf-data").value;
     const numeroPedido = document.getElementById("pdf-numero-pedido").value.trim() || null;
+    const condicaoPagamentoCodigo = document.getElementById("pdf-condicao-pagamento").value.trim() || null;
     const linhas = Array.from(document.querySelectorAll("#tbl-pdf-itens tbody tr"));
 
     let salvos = 0;
@@ -1028,6 +1088,7 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
         volume: quantidade,
         valor: item.valor_total != null ? Number(item.valor_total) : null,
         numero_pedido: numeroPedido,
+        condicao_pagamento_codigo: condicaoPagamentoCodigo,
       });
       if (erroCompra) throw erroCompra;
       salvos++;
@@ -1052,5 +1113,6 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
 (async function init() {
   await recarregarApoio();
   await loadMeta();
+  await loadCondicoesPagamento();
   await loadPainel();
 })();
