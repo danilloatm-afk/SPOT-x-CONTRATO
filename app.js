@@ -928,7 +928,7 @@ document.getElementById("filtro-produto-painel").addEventListener("input", rende
 document.getElementById("btn-refresh-painel").addEventListener("click", loadPainel);
 
 // ---------- importar pedido de compra (PDF) ----------
-const EXTRACT_PDF_URL = `${SUPABASE_URL}/functions/v1/cs-extract-pedido`;
+const EXTRACT_PDF_URL = `${SUPABASE_URL}/functions/v1/smart-worker`;
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_4fZ0DlFJq1ec5xTXurwGSQ_Ke3JELGZ";
 let pdfExtraido = null; // { fornecedor_nome, itens: [{produto_nome, quantidade, unidade}] }
 let pedidoDuplicadoDetectado = false;
