@@ -28,7 +28,7 @@ $PastaMonitorada = "\\192.168.0.228\wehrmann\COMPRAS\ORDENS DE COMPRA"
 
 $SUPABASE_URL = "https://jvfyqvefznkpcvjaerta.supabase.co"
 $SUPABASE_KEY = "sb_publishable_4fZ0DlFJq1ec5xTXurwGSQ_Ke3JELGZ"
-$EXTRACT_URL = "$SUPABASE_URL/functions/v1/rapid-action"
+$EXTRACT_URL = "$SUPABASE_URL/functions/v1/cs-extract-pedido"
 
 $PastaProcessados = Join-Path $PastaMonitorada "Processados"
 $PastaDuplicados = Join-Path $PastaMonitorada "Duplicados"
