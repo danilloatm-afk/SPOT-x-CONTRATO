@@ -59,6 +59,25 @@ function ApenasDigitos($texto) {
 
 $fornecedores = Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/cs_fornecedores?select=id,nome,cnpj,ativo&ativo=eq.true" -Headers $HeadersJson -Method Get
 $produtos = Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/cs_produtos?select=id,nome,unidade,codigo,ativo&ativo=eq.true" -Headers $HeadersJson -Method Get
+$condicoesPagamento = Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/cs_condicoes_pagamento?select=codigo,descricao" -Headers $HeadersJson -Method Get
+
+function Normalizar-CondicaoTexto($texto) {
+    if ([string]::IsNullOrWhiteSpace($texto)) { return "" }
+    $t = $texto.ToUpper() -replace '[/,.]+', ' '
+    $t = $t -replace '\s+', ' '
+    return $t.Trim()
+}
+
+# Alguns modelos de pedido não mostram o código da condição de pagamento, só
+# o texto por extenso (ex: "A VISTA", "28 56 84 DIAS") — tenta achar o
+# código correspondente casando esse texto com a tabela de condições.
+function Find-CodigoPorTexto($texto) {
+    $alvo = Normalizar-CondicaoTexto $texto
+    if (-not $alvo) { return $null }
+    $match = $condicoesPagamento | Where-Object { (Normalizar-CondicaoTexto $_.descricao) -eq $alvo } | Select-Object -First 1
+    if ($match) { return $match.codigo }
+    return $null
+}
 
 function Find-Fornecedor($nome, $cnpj) {
     $cnpjAlvo = ApenasDigitos $cnpj
@@ -179,6 +198,11 @@ foreach ($arquivo in $arquivos) {
         $dataCompra = Get-Date -Format "yyyy-MM-dd"
         $salvos = 0
 
+        $codigoPagamento = if ($dados.condicao_pagamento_codigo) { $dados.condicao_pagamento_codigo } else { Find-CodigoPorTexto $dados.condicao_pagamento_texto }
+        if (-not $dados.condicao_pagamento_codigo -and $codigoPagamento) {
+            Write-Log "  Condicao de pagamento sem codigo no PDF, casada por texto: '$($dados.condicao_pagamento_texto)' -> codigo $codigoPagamento"
+        }
+
         foreach ($item in $dados.itens) {
             $produtoId = Get-OrCreate-Produto $item.produto_nome $item.produto_codigo $item.unidade
             $compra = @{
@@ -189,7 +213,7 @@ foreach ($arquivo in $arquivos) {
                 volume        = $item.quantidade
                 valor         = if ($null -ne $item.valor_total) { $item.valor_total } else { $null }
                 numero_pedido = if ($dados.numero_pedido) { $dados.numero_pedido } else { $null }
-                condicao_pagamento_codigo = if ($dados.condicao_pagamento_codigo) { $dados.condicao_pagamento_codigo } else { $null }
+                condicao_pagamento_codigo = if ($codigoPagamento) { $codigoPagamento } else { $null }
             } | ConvertTo-Json
             Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/cs_compras" -Headers $HeadersJson -Method Post -Body $compra | Out-Null
             $salvos++
