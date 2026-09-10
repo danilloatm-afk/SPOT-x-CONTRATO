@@ -70,6 +70,24 @@ function diasPorCodigoPagamento(codigo) {
   return item && item.dias != null ? Number(item.dias) : null;
 }
 
+function normalizarCondicaoTexto(texto) {
+  return String(texto || "")
+    .toUpperCase()
+    .replace(/[\/,.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Alguns modelos de pedido não mostram o código da condição de pagamento,
+// só o texto por extenso (ex: "A VISTA", "28 56 84 DIAS") — tenta achar o
+// código correspondente casando esse texto com a tabela de condições.
+function codigoPorTextoCondicao(texto) {
+  const alvo = normalizarCondicaoTexto(texto);
+  if (!alvo) return null;
+  const match = condicoesPagamentoCache.find((c) => normalizarCondicaoTexto(c.descricao) === alvo);
+  return match ? match.codigo : null;
+}
+
 function condicaoPagamentoLabel(codigo) {
   if (!codigo) return "—";
   const dias = diasPorCodigoPagamento(codigo);
@@ -1049,14 +1067,21 @@ document.getElementById("btn-ler-pdf").addEventListener("click", async () => {
       : "";
     document.getElementById("pdf-data").value = new Date().toISOString().slice(0, 10);
     document.getElementById("pdf-numero-pedido").value = pdfExtraido.numero_pedido || "";
-    const codigoPagamento = pdfExtraido.condicao_pagamento_codigo || "";
+    // Alguns modelos de pedido não mostram o código, só o texto por extenso
+    // ("A VISTA", "28 56 84 DIAS") — tenta casar esse texto com a tabela de
+    // condições pra achar o código mesmo quando a IA não achou um separado.
+    const codigoPagamento =
+      pdfExtraido.condicao_pagamento_codigo || codigoPorTextoCondicao(pdfExtraido.condicao_pagamento_texto) || "";
     document.getElementById("pdf-condicao-pagamento").value = codigoPagamento;
     const diasPagamento = diasPorCodigoPagamento(codigoPagamento);
+    const textoLido = pdfExtraido.condicao_pagamento_texto ? ` (lido: "${pdfExtraido.condicao_pagamento_texto}")` : "";
     document.getElementById("pdf-condicao-pagamento-info").textContent = codigoPagamento
       ? diasPagamento != null
-        ? `Prazo: ${diasPagamento} dias (código ${codigoPagamento})`
-        : `Código ${codigoPagamento} lido, mas sem prazo cadastrado na tabela de condições.`
-      : "";
+        ? `Prazo: ${diasPagamento} dias (código ${codigoPagamento})${textoLido}`
+        : `Código ${codigoPagamento} lido, mas sem prazo cadastrado na tabela de condições.${textoLido}`
+      : pdfExtraido.condicao_pagamento_texto
+        ? `Condição lida: "${pdfExtraido.condicao_pagamento_texto}" — não achei um código correspondente na tabela, preencha manualmente se souber.`
+        : "";
     await checarPedidoDuplicado(pdfExtraido.numero_pedido);
     renderTabelaPdfItens();
     document.getElementById("pdf-revisao").classList.remove("hidden");
