@@ -16,6 +16,18 @@
 #   Duplicados\    -> pulado porque o número do pedido já tinha sido importado
 #   Erros\         -> deu algum problema (confira o log)
 #
+# RODANDO EM MAIS DE UM COMPUTADOR (redundância): este script pode ser
+# instalado em várias máquinas ao mesmo tempo, todas apontando pra mesma pasta
+# de rede — se uma estiver desligada, a outra continua importando. Pra não
+# duplicar nem conflitar quando as duas rodam juntas, cada PDF é
+# "reivindicado" ANTES de processar: é movido (operação atômica do Windows, só
+# UMA máquina consegue) pra a subpasta "Processando", com a data/hora e o nome
+# do computador no começo do nome do arquivo. A outra máquina recebe erro no
+# Move-Item e simplesmente pula aquele arquivo. Se uma máquina cair no meio do
+# processamento, o arquivo preso em "Processando" volta sozinho pra pasta
+# principal depois de 30 minutos. Cada máquina grava seu próprio log.
+# (Mesmo esquema do robô do Rotas de Compras.)
+#
 # CONFIGURAÇÃO: ajuste $PastaMonitorada abaixo para o caminho real da sua
 # pasta de rede. Depois, agende esse script no Agendador de Tarefas do
 # Windows pra rodar a cada 15-30 minutos (veja instruções no chat).
@@ -33,15 +45,28 @@ $EXTRACT_URL = "$SUPABASE_URL/functions/v1/smart-worker"
 $PastaProcessados = Join-Path $PastaMonitorada "Processados"
 $PastaDuplicados = Join-Path $PastaMonitorada "Duplicados"
 $PastaErros = Join-Path $PastaMonitorada "Erros"
-$LogFile = Join-Path $PastaMonitorada "importacao_log.txt"
+# Área de "reivindicação" — ver nota de redundância no topo do arquivo.
+$PastaProcessando = Join-Path $PastaMonitorada "Processando"
+# Um log por computador (sem conflito de escrita entre as máquinas).
+$LogFile = Join-Path $PastaMonitorada "importacao_log_$($env:COMPUTERNAME).txt"
 
-foreach ($p in @($PastaProcessados, $PastaDuplicados, $PastaErros)) {
+foreach ($p in @($PastaProcessados, $PastaDuplicados, $PastaErros, $PastaProcessando)) {
     if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null }
 }
 
 function Write-Log($mensagem) {
     $linha = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $mensagem"
-    Add-Content -Path $LogFile -Value $linha -Encoding utf8
+    # Pequeno retry — um antivírus ou outro processo local pode segurar o
+    # arquivo por uma fração de segundo.
+    for ($tentativa = 1; $tentativa -le 3; $tentativa++) {
+        try {
+            Add-Content -Path $LogFile -Value $linha -Encoding utf8 -ErrorAction Stop
+            break
+        } catch {
+            if ($tentativa -eq 3) { Write-Output "(falha ao gravar log) $linha" }
+            else { Start-Sleep -Milliseconds 300 }
+        }
+    }
     Write-Output $linha
 }
 
@@ -150,17 +175,68 @@ function Test-PedidoJaImportado($numeroPedido) {
     return ($existe.Count -gt 0)
 }
 
+# ---------- recupera arquivos presos em "Processando" ----------
+# Se um computador caiu/foi desligado no meio de um arquivo, ele ficaria preso
+# aqui pra sempre. O nome reivindicado começa com a data/hora da reivindicação
+# (yyyyMMddHHmmss__COMPUTADOR__nome.pdf); passou de 30 min, devolve pra pasta
+# principal com o nome original. Se o pedido chegou a ser salvo antes da queda,
+# o teste de duplicado (Test-PedidoJaImportado) manda o arquivo pra Duplicados.
+Get-ChildItem -Path $PastaProcessando -File -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.Name -match '^(\d{14})__(.+?)__(.+)$') {
+        $quando = [datetime]::ParseExact($Matches[1], "yyyyMMddHHmmss", $null)
+        if ($quando -lt (Get-Date).AddMinutes(-30)) {
+            try {
+                Move-Item -Path $_.FullName -Destination (Join-Path $PastaMonitorada $Matches[3]) -ErrorAction Stop
+                Write-Log "Recuperado arquivo preso em Processando (reivindicado por $($Matches[2])): $($Matches[3])"
+            } catch { }
+        }
+    }
+}
+
 # ---------- processa os PDFs novos ----------
+# Pequena espera aleatória: se as tarefas de duas máquinas estiverem
+# sincronizadas (disparando no mesmo segundo), isso espalha as duas.
+Start-Sleep -Seconds (Get-Random -Minimum 0 -Maximum 20)
+
 $arquivos = Get-ChildItem -Path $PastaMonitorada -Filter "*.pdf" -File
 if ($arquivos.Count -eq 0) {
     Write-Log "Nenhum PDF novo encontrado."
     exit 0
 }
 
-foreach ($arquivo in $arquivos) {
-    Write-Log "Processando: $($arquivo.Name)"
+# 1) Reivindica TODOS os arquivos de uma vez (ver nota no topo).
+# Atenção: pela rede, se duas máquinas pegam o MESMO arquivo no mesmo
+# milissegundo, o Windows pode dar "ok" pras duas (o arquivo é renomeado em
+# cadeia e fica com quem renomeou por último) — por isso a etapa 2 confirma.
+$reivindicados = @()
+foreach ($arquivoOriginal in $arquivos) {
+    $nomeReivindicado = "{0}__{1}__{2}" -f (Get-Date -Format "yyyyMMddHHmmss"), $env:COMPUTERNAME, $arquivoOriginal.Name
+    $caminhoReivindicado = Join-Path $PastaProcessando $nomeReivindicado
     try {
-        $nomeMinusculo = $arquivo.Name.ToLower()
+        [System.IO.File]::Move($arquivoOriginal.FullName, $caminhoReivindicado)
+        $reivindicados += [pscustomobject]@{ Nome = $arquivoOriginal.Name; Caminho = $caminhoReivindicado }
+    } catch {
+        # outra máquina já pegou este — normal na redundância, não é falha
+    }
+}
+
+# 2) Espera e confirma: só é DONO quem ainda tem o seu arquivo depois da espera
+# (quem foi "ultrapassado" por outra máquina vê o seu sumir e pula). Testado
+# com 3 máquinas simuladas disparando juntas: sempre um único dono por arquivo.
+Start-Sleep -Seconds 3
+$meusArquivos = @($reivindicados | Where-Object { Test-Path -LiteralPath $_.Caminho })
+if ($meusArquivos.Count -eq 0) {
+    Write-Log "Nenhum PDF novo para esta máquina (outra máquina já pegou, ou não havia)."
+    exit 0
+}
+
+foreach ($item in $meusArquivos) {
+    $nomeOriginal = $item.Nome
+    $arquivo = Get-Item -LiteralPath $item.Caminho
+
+    Write-Log "Processando: $nomeOriginal"
+    try {
+        $nomeMinusculo = $nomeOriginal.ToLower()
         $modalidade = if ($nomeMinusculo -match "contrato") { "contrato" } else { "spot" }
 
         $bytes = [System.IO.File]::ReadAllBytes($arquivo.FullName)
@@ -190,7 +266,7 @@ foreach ($arquivo in $arquivos) {
 
         if (Test-PedidoJaImportado $dados.numero_pedido) {
             Write-Log "  Pedido Nº $($dados.numero_pedido) já importado antes — pulando (movido para Duplicados)."
-            Move-Item -Path $arquivo.FullName -Destination (Join-Path $PastaDuplicados $arquivo.Name) -Force
+            Move-Item -Path $arquivo.FullName -Destination (Join-Path $PastaDuplicados $nomeOriginal) -Force
             continue
         }
 
@@ -220,11 +296,13 @@ foreach ($arquivo in $arquivos) {
         }
 
         Write-Log "  OK: fornecedor '$($dados.fornecedor_nome)', $salvos item(ns), modalidade=$modalidade, pedido=$($dados.numero_pedido)"
-        Move-Item -Path $arquivo.FullName -Destination (Join-Path $PastaProcessados $arquivo.Name) -Force
+        Move-Item -Path $arquivo.FullName -Destination (Join-Path $PastaProcessados $nomeOriginal) -Force
     }
     catch {
         Write-Log "  ERRO: $($_.Exception.Message)"
-        Move-Item -Path $arquivo.FullName -Destination (Join-Path $PastaErros $arquivo.Name) -Force
+        if (Test-Path $arquivo.FullName) {
+            Move-Item -Path $arquivo.FullName -Destination (Join-Path $PastaErros $nomeOriginal) -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
