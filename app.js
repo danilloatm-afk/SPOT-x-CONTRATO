@@ -63,13 +63,23 @@ function formatarData(iso) {
 // chamada (um builder não pode ser reaproveitado entre páginas) e deve ter
 // ordenação determinística pra as páginas não se sobreporem.
 const TAMANHO_PAGINA_API = 1000;
+// A 1ª página vai sozinha (se vier incompleta, acabou); as seguintes saem em
+// lotes de 4 em paralelo em vez de uma de cada vez, que era o grosso da espera.
 async function buscarTudo(montarQuery) {
-  const todos = [];
-  for (let de = 0; ; de += TAMANHO_PAGINA_API) {
-    const { data, error } = await comTimeout(montarQuery().range(de, de + TAMANHO_PAGINA_API - 1), 20000);
-    if (error) return { data: null, error };
-    todos.push(...data);
-    if (data.length < TAMANHO_PAGINA_API) break;
+  const T = TAMANHO_PAGINA_API;
+  const pagina = (n) => comTimeout(montarQuery().range(n * T, n * T + T - 1), 20000);
+  const primeira = await pagina(0);
+  if (primeira.error) return { data: null, error: primeira.error };
+  const todos = [...primeira.data];
+  if (primeira.data.length < T) return { data: todos, error: null };
+  const LOTE = 4;
+  for (let n = 1; ; n += LOTE) {
+    const lote = await Promise.all(Array.from({ length: LOTE }, (_, k) => pagina(n + k)));
+    for (const r of lote) {
+      if (r.error) return { data: null, error: r.error };
+      todos.push(...r.data);
+    }
+    if (lote.some((r) => r.data.length < T)) break;
   }
   return { data: todos, error: null };
 }
@@ -116,14 +126,53 @@ async function loadCondicoesPagamento() {
   condicoesPagamentoCache = error ? condicoesPagamentoCache : data;
 }
 
+// Índice id -> item por cache (WeakMap: quando o cache é substituído por um
+// array novo, o índice antigo some sozinho). Antes era um .find() linear a cada
+// chamada, que com 2000+ produtos virava milhões de comparações por tela.
+const indicesPorId = new WeakMap();
+function itemPorId(cache, id) {
+  let indice = indicesPorId.get(cache);
+  if (!indice) {
+    indice = new Map(cache.map((x) => [String(x.id), x]));
+    indicesPorId.set(cache, indice);
+  }
+  return indice.get(String(id));
+}
+
 function nomePor(cache, id) {
-  const item = cache.find((x) => String(x.id) === String(id));
+  const item = itemPorId(cache, id);
   return item ? item.nome : "—";
 }
 
 function codigoPor(cache, id) {
-  const item = cache.find((x) => String(x.id) === String(id));
+  const item = itemPorId(cache, id);
   return item ? item.codigo || "—" : "—";
+}
+
+// Compras: carregadas uma vez e reaproveitadas entre as abas (Painel e
+// Compras usam os mesmos dados). Recarrega se passou da validade ou se algo
+// mudou (invalidarCompras) — o botão Atualizar / Filtrar também força.
+const VALIDADE_CACHE_COMPRAS_MS = 60000;
+let comprasCarregadasEm = 0;
+let carregandoCompras = null;
+function invalidarCompras() {
+  comprasCarregadasEm = 0;
+}
+function garantirCompras(forcar = false) {
+  if (!forcar && comprasCarregadasEm && Date.now() - comprasCarregadasEm < VALIDADE_CACHE_COMPRAS_MS) return Promise.resolve();
+  if (!carregandoCompras) {
+    carregandoCompras = buscarTudo(() => db.from("cs_compras").select("*").order("id"))
+      .then(({ data, error }) => {
+        if (!error) {
+          todasComprasCache = data;
+          comprasCarregadasEm = Date.now();
+        }
+      })
+      .finally(() => {
+        carregandoCompras = null;
+      });
+  }
+  return carregandoCompras;
 }
 
 // ---------- tabs ----------
@@ -231,6 +280,7 @@ document.querySelectorAll(".cadastro-lista").forEach((ul) => {
       const fk = FK_POR_TABELA[tabela];
       await db.from("cs_compras").update({ [fk]: alvoId }).eq(fk, id);
       await db.from(tabela).delete().eq("id", id);
+      invalidarCompras();
       await recarregarApoio();
       await loadPainel();
       await loadLista();
@@ -289,6 +339,7 @@ document.getElementById("form-compra").addEventListener("submit", async (e) => {
     };
     const { error } = await db.from("cs_compras").insert(payload);
     if (error) throw error;
+    invalidarCompras();
     feedback.textContent = "Compra registrada com sucesso.";
     feedback.className = "feedback success";
     e.target.reset();
@@ -303,24 +354,27 @@ document.getElementById("form-compra").addEventListener("submit", async (e) => {
 const LISTA_POR_PAGINA = 25;
 let paginaAtualLista = 1;
 
-async function loadLista() {
-  const numeroPedido = document.getElementById("fil-numero-pedido").value.trim();
+// Os filtros são aplicados em memória sobre as compras já carregadas — não
+// precisa ir ao banco de novo a cada filtro (antes eram ~1s por clique).
+async function loadLista(forcar = false) {
+  await garantirCompras(forcar);
+  const numeroPedido = document.getElementById("fil-numero-pedido").value.trim().toLowerCase();
   const modalidade = document.getElementById("fil-modalidade").value;
   const fornecedor = document.getElementById("fil-fornecedor").value;
-  const { data, error } = await buscarTudo(() => {
-    let query = db.from("cs_compras").select("*").order("data", { ascending: false }).order("id", { ascending: false });
-    if (numeroPedido) query = query.ilike("numero_pedido", `%${numeroPedido}%`);
-    if (modalidade) query = query.eq("modalidade", modalidade);
-    if (fornecedor) query = query.eq("fornecedor_id", fornecedor);
-    return query;
-  });
-  comprasCache = error ? [] : data;
+  comprasCache = todasComprasCache
+    .filter(
+      (c) =>
+        (!numeroPedido || String(c.numero_pedido || "").toLowerCase().includes(numeroPedido)) &&
+        (!modalidade || c.modalidade === modalidade) &&
+        (!fornecedor || String(c.fornecedor_id) === String(fornecedor))
+    )
+    .sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : b.id - a.id));
   paginaAtualLista = 1;
   renderLista();
 }
 
 document.getElementById("fil-numero-pedido").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") loadLista();
+  if (e.key === "Enter") loadLista(true);
 });
 
 document.getElementById("fil-produto-texto").addEventListener("input", () => {
@@ -456,7 +510,7 @@ document.getElementById("btn-exportar-excel").addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
-document.getElementById("btn-filtrar-lista").addEventListener("click", loadLista);
+document.getElementById("btn-filtrar-lista").addEventListener("click", () => loadLista(true));
 
 document.querySelector("#tbl-lista tbody").addEventListener("click", async (e) => {
   const marcar = e.target.closest(".lista-marcar");
@@ -468,7 +522,7 @@ document.querySelector("#tbl-lista tbody").addEventListener("click", async (e) =
   if (!btn) return;
   if (!confirm("Excluir esta compra?")) return;
   await db.from("cs_compras").delete().eq("id", btn.dataset.excluir);
-  await loadLista();
+  await loadLista(true);
 });
 
 function atualizarSelecaoLista() {
@@ -494,7 +548,7 @@ document.getElementById("btn-excluir-selecionadas").addEventListener("click", as
   if (!ids.length) return;
   if (!confirm(`Excluir ${ids.length} compra(s) selecionada(s)? Essa ação não pode ser desfeita.`)) return;
   await db.from("cs_compras").delete().in("id", ids);
-  await loadLista();
+  await loadLista(true);
 });
 
 // ---------- indicador: avanço de spot para contrato ----------
@@ -710,9 +764,8 @@ document.getElementById("form-meta").addEventListener("submit", async (e) => {
 });
 
 // ---------- painel ----------
-async function loadPainel() {
-  const { data, error } = await buscarTudo(() => db.from("cs_compras").select("*").order("id"));
-  todasComprasCache = error ? [] : data;
+async function loadPainel(forcar = false) {
+  await garantirCompras(forcar);
 
   const relacoes = relacoesFornecedorProduto(todasComprasCache);
   renderResumoCards(relacoes);
@@ -801,9 +854,7 @@ function calcularSugestoesMigracao(relacoes) {
   return relacoes
     .filter((r) => r.modalidade_atual === "spot")
     .map((r) => {
-      const comprasSpot = todasComprasCache.filter(
-        (c) => String(c.fornecedor_id) === String(r.fornecedor_id) && String(c.produto_id) === String(r.produto_id) && c.modalidade === "spot"
-      );
+      const comprasSpot = r.compras.filter((c) => c.modalidade === "spot");
       // Conta pedidos distintos, não linhas de compra — um mesmo pedido pode
       // ter o mesmo item em mais de uma linha (lotes/entregas separadas) e
       // isso não deve contar como recorrência de verdade.
@@ -968,7 +1019,7 @@ function renderLinhasProdutoVisiveis() {
 
 document.getElementById("filtro-produto-painel").addEventListener("input", renderLinhasProdutoVisiveis);
 
-document.getElementById("btn-refresh-painel").addEventListener("click", loadPainel);
+document.getElementById("btn-refresh-painel").addEventListener("click", () => loadPainel(true));
 
 // ---------- importar pedido de compra (PDF) ----------
 const EXTRACT_PDF_URL = `${SUPABASE_URL}/functions/v1/smart-worker`;
@@ -1216,6 +1267,7 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
     document.getElementById("pdf-pedido-duplicado-aviso").classList.add("hidden");
     pdfExtraido = null;
     pedidoDuplicadoDetectado = false;
+    invalidarCompras();
     await recarregarApoio();
   } catch (err) {
     feedback.textContent = "Erro ao salvar: " + err.message;
@@ -1225,8 +1277,7 @@ document.getElementById("btn-salvar-pdf").addEventListener("click", async () => 
 
 // ---------- inicialização ----------
 (async function init() {
-  await recarregarApoio();
-  await loadMeta();
-  await loadCondicoesPagamento();
+  // Tudo em paralelo — antes cada etapa esperava a anterior terminar.
+  await Promise.all([recarregarApoio(), loadMeta(), loadCondicoesPagamento(), garantirCompras()]);
   await loadPainel();
 })();
