@@ -57,6 +57,23 @@ function formatarData(iso) {
   return `${dia}/${mes}/${ano}`;
 }
 
+// A API do Supabase devolve no máximo 1000 linhas por consulta — sem paginar,
+// o app passa a calcular tudo em cima de um pedaço dos dados quando a tabela
+// ultrapassa isso. "montarQuery" precisa devolver um builder NOVO a cada
+// chamada (um builder não pode ser reaproveitado entre páginas) e deve ter
+// ordenação determinística pra as páginas não se sobreporem.
+const TAMANHO_PAGINA_API = 1000;
+async function buscarTudo(montarQuery) {
+  const todos = [];
+  for (let de = 0; ; de += TAMANHO_PAGINA_API) {
+    const { data, error } = await comTimeout(montarQuery().range(de, de + TAMANHO_PAGINA_API - 1), 20000);
+    if (error) return { data: null, error };
+    todos.push(...data);
+    if (data.length < TAMANHO_PAGINA_API) break;
+  }
+  return { data: todos, error: null };
+}
+
 // ---------- caches ----------
 let produtosCache = [];
 let fornecedoresCache = [];
@@ -123,14 +140,14 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 
 // ---------- carregar dados de apoio ----------
 async function loadProdutos() {
-  const { data, error } = await comTimeout(db.from("cs_produtos").select("*").order("ativo", { ascending: false }).order("nome"));
+  const { data, error } = await buscarTudo(() => db.from("cs_produtos").select("*").order("ativo", { ascending: false }).order("nome").order("id"));
   produtosCache = error ? produtosCache : data;
   preencherSelect("cp-produto", produtosCache, "Selecione um produto");
   renderCadastroLista("lista-produtos", produtosCache, "cs_produtos");
 }
 
 async function loadFornecedores() {
-  const { data, error } = await comTimeout(db.from("cs_fornecedores").select("*").order("ativo", { ascending: false }).order("nome"));
+  const { data, error } = await buscarTudo(() => db.from("cs_fornecedores").select("*").order("ativo", { ascending: false }).order("nome").order("id"));
   fornecedoresCache = error ? fornecedoresCache : data;
   preencherSelect("cp-fornecedor", fornecedoresCache, "Selecione um fornecedor");
   preencherSelect("fil-fornecedor", fornecedoresCache, "Todos os fornecedores", true);
@@ -158,21 +175,19 @@ function renderCadastroLista(id, itens, tabela) {
   ul.innerHTML = itens
     .map((i) => {
       const detalhe = i.unidade ? `${i.unidade}${i.codigo ? ` · cód. ${i.codigo}` : ""}` : i.cnpj || "";
-      const outros = itens.filter((o) => o.id !== i.id);
-      const opcoesAlvo = outros.map((o) => `<option value="${o.id}">${escapeHtml(o.nome)}</option>`).join("");
       return `
     <li class="${i.ativo ? "" : "inativo"}" data-item-id="${i.id}">
       <div class="cadastro-linha">
         <span>${escapeHtml(i.nome)}${detalhe ? ` <span class="muted">(${escapeHtml(detalhe)})</span>` : ""}</span>
         <span>
           <button class="link-btn" data-acao="toggle" data-tabela="${tabela}" data-id="${i.id}" data-ativo="${i.ativo}">${i.ativo ? "Desativar" : "Ativar"}</button>
-          <button class="link-btn" data-acao="mesclar" data-id="${i.id}">Mesclar</button>
+          <button class="link-btn" data-acao="mesclar" data-tabela="${tabela}" data-id="${i.id}">Mesclar</button>
           <button class="link-btn danger" data-acao="excluir" data-tabela="${tabela}" data-id="${i.id}">Excluir</button>
         </span>
       </div>
       <div class="cadastro-mesclar-form hidden">
         <span class="muted">Mesclar "${escapeHtml(i.nome)}" em:</span>
-        <select class="cadastro-mesclar-alvo">${opcoesAlvo}</select>
+        <select class="cadastro-mesclar-alvo"></select>
         <button class="btn small primary" data-acao="confirmar-mesclagem" data-tabela="${tabela}" data-id="${i.id}">Confirmar</button>
         <button class="btn small secondary" data-acao="cancelar-mesclagem">Cancelar</button>
       </div>
@@ -196,7 +211,15 @@ document.querySelectorAll(".cadastro-lista").forEach((ul) => {
       await recarregarApoio();
     } else if (acao === "mesclar") {
       ul.querySelectorAll(".cadastro-mesclar-form").forEach((f) => f.classList.add("hidden"));
-      btn.closest("li").querySelector(".cadastro-mesclar-form").classList.remove("hidden");
+      const form = btn.closest("li").querySelector(".cadastro-mesclar-form");
+      // As opções só são montadas ao clicar — com milhares de cadastros, montar
+      // o menu de destino dentro de cada item travava a aba Configurações.
+      const cache = tabela === "cs_produtos" ? produtosCache : fornecedoresCache;
+      form.querySelector(".cadastro-mesclar-alvo").innerHTML = cache
+        .filter((o) => String(o.id) !== String(id))
+        .map((o) => `<option value="${o.id}">${escapeHtml(o.nome)}</option>`)
+        .join("");
+      form.classList.remove("hidden");
     } else if (acao === "cancelar-mesclagem") {
       btn.closest(".cadastro-mesclar-form").classList.add("hidden");
     } else if (acao === "confirmar-mesclagem") {
@@ -281,14 +304,16 @@ const LISTA_POR_PAGINA = 25;
 let paginaAtualLista = 1;
 
 async function loadLista() {
-  let query = db.from("cs_compras").select("*").order("data", { ascending: false });
   const numeroPedido = document.getElementById("fil-numero-pedido").value.trim();
   const modalidade = document.getElementById("fil-modalidade").value;
   const fornecedor = document.getElementById("fil-fornecedor").value;
-  if (numeroPedido) query = query.ilike("numero_pedido", `%${numeroPedido}%`);
-  if (modalidade) query = query.eq("modalidade", modalidade);
-  if (fornecedor) query = query.eq("fornecedor_id", fornecedor);
-  const { data, error } = await comTimeout(query);
+  const { data, error } = await buscarTudo(() => {
+    let query = db.from("cs_compras").select("*").order("data", { ascending: false }).order("id", { ascending: false });
+    if (numeroPedido) query = query.ilike("numero_pedido", `%${numeroPedido}%`);
+    if (modalidade) query = query.eq("modalidade", modalidade);
+    if (fornecedor) query = query.eq("fornecedor_id", fornecedor);
+    return query;
+  });
   comprasCache = error ? [] : data;
   paginaAtualLista = 1;
   renderLista();
@@ -686,7 +711,7 @@ document.getElementById("form-meta").addEventListener("submit", async (e) => {
 
 // ---------- painel ----------
 async function loadPainel() {
-  const { data, error } = await comTimeout(db.from("cs_compras").select("*"));
+  const { data, error } = await buscarTudo(() => db.from("cs_compras").select("*").order("id"));
   todasComprasCache = error ? [] : data;
 
   const relacoes = relacoesFornecedorProduto(todasComprasCache);
