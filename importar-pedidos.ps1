@@ -82,8 +82,23 @@ function ApenasDigitos($texto) {
     return ($texto -replace '\D', '')
 }
 
-$fornecedores = Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/cs_fornecedores?select=id,nome,cnpj,ativo&ativo=eq.true" -Headers $HeadersJson -Method Get
-$produtos = Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/cs_produtos?select=id,nome,unidade,codigo,ativo&ativo=eq.true" -Headers $HeadersJson -Method Get
+# A API do Supabase devolve no máximo 1000 linhas por consulta — sem paginar, o
+# robô deixava de "enxergar" cadastros além da milésima linha e criava duplicados.
+function Get-Todos($uriBase) {
+    $todos = @()
+    $offset = 0
+    while ($true) {
+        $pagina = Invoke-RestMethod -Uri "$uriBase&order=id&limit=1000&offset=$offset" -Headers $HeadersJson -Method Get
+        if (-not $pagina) { break }
+        $todos += @($pagina)
+        if (@($pagina).Count -lt 1000) { break }
+        $offset += 1000
+    }
+    return $todos
+}
+
+$fornecedores = Get-Todos "$SUPABASE_URL/rest/v1/cs_fornecedores?select=id,nome,cnpj,ativo&ativo=eq.true"
+$produtos = Get-Todos "$SUPABASE_URL/rest/v1/cs_produtos?select=id,nome,unidade,codigo,ativo&ativo=eq.true"
 $condicoesPagamento = Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/cs_condicoes_pagamento?select=codigo,descricao" -Headers $HeadersJson -Method Get
 
 function Normalizar-CondicaoTexto($texto) {
